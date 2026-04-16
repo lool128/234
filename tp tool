@@ -1,456 +1,766 @@
---// Click Teleport + Waypoint Sistemi (Tek Tıkla Işınlanma)
---// Waypoint üstüne tıkla = DİREKT IŞINLAN (Tool'a tıklama yok)
+--[[
+	WaypointSystem v3 — Tam Düzeltilmiş
+	
+	DÜZELTMELER:
+	  • Waypointler respawn'da kaybolmuyor (savedWaypoints/waypointOrder script-scope'ta kalıcı)
+	  • Tek partikül efekti (sadece mavi, sadece başlangıç noktasında)
+	  • Airwalk: tool eline alınınca OTOMATİK AÇILIR, bırakılınca OTOMATİK KAPANIR
+	  • Airwalk GUI'de ayrı "kalıcı" toggle YOK — equip/unequip yönetiyor
+	  • Yeni gelen ekranda tüm kayıtlı waypointler görünür
+	  • Tool çoklanmıyor
+	  • E tuşu airwalk toggle (GUI açıkken)
+	  • Ölüm waypoint toggle
+]]
 
-local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
+local Players        = game:GetService("Players")
+local TweenService   = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local RunService     = game:GetService("RunService")
+local Debris         = game:GetService("Debris")
 
-local player = Players.LocalPlayer
-local mouse = player:GetMouse()
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local player    = Players.LocalPlayer
+local mouse     = player:GetMouse()
 
---// Waypoint Verileri
-local savedWaypoints = {}
-local currentWaypointGui = nil
-local isDragging = false
-local dragStartPos = nil
-local frameStartPos = nil
+-- Karakter referansları (respawn'da güncellenir)
+local character, humanoidRootPart, humanoid
 
---// Tool Oluştur (Sadece GUI açmak için)
+local function refreshCharacter(char)
+	character        = char
+	humanoidRootPart = char:WaitForChild("HumanoidRootPart")
+	humanoid         = char:WaitForChild("Humanoid")
+end
+refreshCharacter(player.Character or player.CharacterAdded:Wait())
+
+-- ════════════════════════════════════════════
+--  KALICI VERİLER  (script boyunca yaşar)
+-- ════════════════════════════════════════════
+local savedWaypoints = {}   -- [isim] = CFrame
+local waypointOrder  = {}   -- sıralı isim listesi
+local currentGui     = nil  -- aktif ScreenGui
+
+local deathWaypointEnabled = true
+
+-- ════════════════════════════════════════════
+--  AIRWALK
+-- ════════════════════════════════════════════
+local airwalking     = false
+local airwalkPlatform = nil
+
+local function airwalkStart()
+	if airwalking then return end
+	airwalking = true
+	airwalkPlatform = Instance.new("Part")
+	airwalkPlatform.Name        = "AirwalkPlatform"
+	airwalkPlatform.Anchored    = true
+	airwalkPlatform.CanCollide  = true
+	airwalkPlatform.Transparency = 1
+	airwalkPlatform.Size        = Vector3.new(4, 1, 4)
+	airwalkPlatform.Parent      = workspace
+	print("✈️ Airwalk AÇIK")
+end
+
+local function airwalkEnd()
+	if not airwalking then return end
+	airwalking = false
+	if airwalkPlatform then
+		airwalkPlatform:Destroy()
+		airwalkPlatform = nil
+	end
+	print("🚶 Airwalk KAPALI")
+end
+
+RunService.Heartbeat:Connect(function()
+	if airwalking and airwalkPlatform and airwalkPlatform.Parent then
+		local hrp = character and character:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			airwalkPlatform.CFrame = CFrame.new(hrp.Position + Vector3.new(0, -3.5, 0))
+		end
+	end
+end)
+
+-- ════════════════════════════════════════════
+--  TOOL  (tek seferlik oluşturulur)
+-- ════════════════════════════════════════════
 local tool = Instance.new("Tool")
-tool.Name = "🌀 Waypoints"
+tool.Name           = "🌀 Waypoints"
 tool.RequiresHandle = false
-tool.CanBeDropped = false
+tool.CanBeDropped   = false
 
---// Teleport Fonksiyonu
-local function teleportToPosition(cframe)
-    if not cframe then return end
-    
-    -- Efekt
-    local part = Instance.new("Part")
-    part.Anchored = true
-    part.CanCollide = false
-    part.Transparency = 1
-    part.Size = Vector3.new(1, 1, 1)
-    part.Position = humanoidRootPart.Position
-    part.Parent = workspace
-    
-    local attachment = Instance.new("Attachment", part)
-    local particle = Instance.new("ParticleEmitter", attachment)
-    particle.Texture = "rbxassetid://258128463"
-    particle.Size = NumberSequence.new(2, 0)
-    particle.Lifetime = NumberRange.new(0.3, 0.6)
-    particle.Rate = 50
-    particle.Speed = NumberRange.new(8, 15)
-    particle.Color = ColorSequence.new(Color3.fromRGB(0, 150, 255))
-    
-    game:GetService("Debris"):AddItem(part, 1)
-    
-    -- Tween teleport
-    local tween = TweenService:Create(humanoidRootPart, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
-        CFrame = cframe
-    })
-    tween:Play()
-    
-    -- Varış efekti
-    delay(0.2, function()
-        local endPart = part:Clone()
-        endPart.Position = cframe.Position
-        endPart.Parent = workspace
-        game:GetService("Debris"):AddItem(endPart, 1)
-    end)
-    
-    -- Bildirim
-    print("🚀 Işınlanıldı!")
+-- ════════════════════════════════════════════
+--  TELEPORT (tek mavi partikül)
+-- ════════════════════════════════════════════
+local function spawnParticle(pos)
+	local part = Instance.new("Part")
+	part.Anchored     = true
+	part.CanCollide   = false
+	part.Transparency = 1
+	part.Size         = Vector3.new(1, 1, 1)
+	part.Position     = pos
+	part.Parent       = workspace
+
+	local att = Instance.new("Attachment", part)
+	local pe  = Instance.new("ParticleEmitter", att)
+	pe.Texture   = "rbxassetid://258128463"
+	pe.Size      = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 2),
+		NumberSequenceKeypoint.new(1, 0)
+	})
+	pe.Lifetime  = NumberRange.new(0.3, 0.6)
+	pe.Rate      = 60
+	pe.Speed     = NumberRange.new(8, 15)
+	pe.Color     = ColorSequence.new(Color3.fromRGB(0, 150, 255))
+
+	Debris:AddItem(part, 0.8)
 end
 
---// GUI Oluşturma Fonksiyonu
-local function createWaypointGui()
-    if currentWaypointGui then
-        currentWaypointGui:Destroy()
-        currentWaypointGui = nil
-    end
-    
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "WaypointGui"
-    screenGui.ResetOnSpawn = false
-    screenGui.Parent = player:WaitForChild("PlayerGui")
-    
-    -- Ana Frame
-    local mainFrame = Instance.new("Frame")
-    mainFrame.Name = "MainFrame"
-    mainFrame.Size = UDim2.new(0, 260, 0, 340)
-    mainFrame.Position = UDim2.new(0.5, -130, 0.5, -170)
-    mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-    mainFrame.BorderSizePixel = 0
-    mainFrame.Active = true
-    mainFrame.Parent = screenGui
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 10)
-    corner.Parent = mainFrame
-    
-    -- Sürükleme Barı
-    local dragBar = Instance.new("Frame")
-    dragBar.Name = "DragBar"
-    dragBar.Size = UDim2.new(1, 0, 0, 40)
-    dragBar.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
-    dragBar.BorderSizePixel = 0
-    dragBar.Active = true
-    dragBar.Parent = mainFrame
-    
-    local dragCorner = Instance.new("UICorner")
-    dragCorner.CornerRadius = UDim.new(0, 10)
-    dragCorner.Parent = dragBar
-    
-    -- Başlık
-    local title = Instance.new("TextLabel")
-    title.Name = "Title"
-    title.Size = UDim2.new(1, -40, 1, 0)
-    title.Position = UDim2.new(0, 10, 0, 0)
-    title.BackgroundTransparency = 1
-    title.Text = "📍 Waypoints"
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.TextSize = 16
-    title.Font = Enum.Font.GothamBold
-    title.Parent = dragBar
-    
-    -- Kapatma butonu
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Name = "Close"
-    closeBtn.Size = UDim2.new(0, 30, 0, 30)
-    closeBtn.Position = UDim2.new(1, -35, 0, 5)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
-    closeBtn.BorderSizePixel = 0
-    closeBtn.Text = "X"
-    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    closeBtn.TextSize = 14
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.Parent = dragBar
-    
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0, 6)
-    closeCorner.Parent = closeBtn
-    
-    -- Sürükleme ikonu
-    local dragIcon = Instance.new("TextLabel")
-    dragIcon.Size = UDim2.new(0, 20, 0, 20)
-    dragIcon.Position = UDim2.new(0, 5, 0, 10)
-    dragIcon.BackgroundTransparency = 1
-    dragIcon.Text = "⋮⋮"
-    dragIcon.TextColor3 = Color3.fromRGB(150, 150, 150)
-    dragIcon.Parent = dragBar
-    
-    -- Bilgi metni
-    local infoLabel = Instance.new("TextLabel")
-    infoLabel.Name = "InfoLabel"
-    infoLabel.Size = UDim2.new(1, -20, 0, 30)
-    infoLabel.Position = UDim2.new(0, 10, 0, 45)
-    infoLabel.BackgroundTransparency = 1
-    infoLabel.Text = "Kayıtlı yere tıkla = Işınlan"
-    infoLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-    infoLabel.TextSize = 11
-    infoLabel.Font = Enum.Font.Gotham
-    infoLabel.Parent = mainFrame
-    
-    -- Scroll Frame (Waypoint listesi)
-    local scrollFrame = Instance.new("ScrollingFrame")
-    scrollFrame.Name = "WaypointList"
-    scrollFrame.Size = UDim2.new(1, -20, 0, 170)
-    scrollFrame.Position = UDim2.new(0, 10, 0, 80)
-    scrollFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
-    scrollFrame.BorderSizePixel = 0
-    scrollFrame.ScrollBarThickness = 4
-    scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 150)
-    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-    scrollFrame.Parent = mainFrame
-    
-    local scrollCorner = Instance.new("UICorner")
-    scrollCorner.CornerRadius = UDim.new(0, 6)
-    scrollCorner.Parent = scrollFrame
-    
-    -- UI List Layout
-    local listLayout = Instance.new("UIListLayout")
-    listLayout.Padding = UDim.new(0, 5)
-    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    listLayout.Parent = scrollFrame
-    
-    -- Kaydet Butonu
-    local saveButton = Instance.new("TextButton")
-    saveButton.Name = "SaveButton"
-    saveButton.Size = UDim2.new(1, -20, 0, 35)
-    saveButton.Position = UDim2.new(0, 10, 0, 255)
-    saveButton.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
-    saveButton.BorderSizePixel = 0
-    saveButton.Text = "➕ Mevcut Konumu Kaydet"
-    saveButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    saveButton.TextSize = 12
-    saveButton.Font = Enum.Font.GothamBold
-    saveButton.Parent = mainFrame
-    
-    local saveCorner = Instance.new("UICorner")
-    saveCorner.CornerRadius = UDim.new(0, 6)
-    saveCorner.Parent = saveButton
-    
-    -- Mouse Teleport Butonu
-    local mouseTpButton = Instance.new("TextButton")
-    mouseTpButton.Name = "MouseTp"
-    mouseTpButton.Size = UDim2.new(1, -20, 0, 35)
-    mouseTpButton.Position = UDim2.new(0, 10, 0, 295)
-    mouseTpButton.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
-    mouseTpButton.BorderSizePixel = 0
-    mouseTpButton.Text = "🖱️ Mouse Konumuna Git"
-    mouseTpButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    mouseTpButton.TextSize = 12
-    mouseTpButton.Font = Enum.Font.GothamBold
-    mouseTpButton.Parent = mainFrame
-    
-    local mouseCorner = Instance.new("UICorner")
-    mouseCorner.CornerRadius = UDim.new(0, 6)
-    mouseCorner.Parent = mouseTpButton
-    
-    --// SÜRÜKLEME SİSTEMİ
-    local function updateDrag(input)
-        local delta = input.Position - dragStartPos
-        mainFrame.Position = UDim2.new(
-            frameStartPos.X.Scale, 
-            frameStartPos.X.Offset + delta.X,
-            frameStartPos.Y.Scale, 
-            frameStartPos.Y.Offset + delta.Y
-        )
-    end
-    
-    dragBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or 
-           input.UserInputType == Enum.UserInputType.Touch then
-            isDragging = true
-            dragStartPos = input.Position
-            frameStartPos = mainFrame.Position
-        end
-    end)
-    
-    dragBar.InputChanged:Connect(function(input)
-        if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or 
-                          input.UserInputType == Enum.UserInputType.Touch) then
-            updateDrag(input)
-        end
-    end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or 
-                          input.UserInputType == Enum.UserInputType.Touch) then
-            updateDrag(input)
-        end
-    end)
-    
-    dragBar.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or 
-           input.UserInputType == Enum.UserInputType.Touch then
-            isDragging = false
-        end
-    end)
-    
-    -- Kapatma butonu
-    closeBtn.MouseButton1Click:Connect(function()
-        closeWaypointGui()
-    end)
-    
-    --// Waypoint Listesini Güncelle
-    local function updateWaypointList()
-        -- Eski butonları temizle
-        for _, child in ipairs(scrollFrame:GetChildren()) do
-            if child:IsA("TextButton") then
-                child:Destroy()
-            end
-        end
-        
-        -- Yeni butonları ekle
-        for name, cframe in pairs(savedWaypoints) do
-            local waypointButton = Instance.new("TextButton")
-            waypointButton.Name = name
-            waypointButton.Size = UDim2.new(1, -10, 0, 35)
-            waypointButton.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
-            waypointButton.BorderSizePixel = 0
-            waypointButton.Text = "🚀 " .. name .. " (Tıkla=Git)"
-            waypointButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-            waypointButton.TextSize = 13
-            waypointButton.Font = Enum.Font.GothamBold
-            waypointButton.LayoutOrder = #scrollFrame:GetChildren()
-            waypointButton.Parent = scrollFrame
-            
-            local btnCorner = Instance.new("UICorner")
-            btnCorner.CornerRadius = UDim.new(0, 6)
-            btnCorner.Parent = waypointButton
-            
-            -- Silme butonu (X) - Sağ üst köşede
-            local deleteBtn = Instance.new("TextButton")
-            deleteBtn.Name = "Delete"
-            deleteBtn.Size = UDim2.new(0, 28, 0, 28)
-            deleteBtn.Position = UDim2.new(1, -32, 0, 3)
-            deleteBtn.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
-            deleteBtn.BorderSizePixel = 0
-            deleteBtn.Text = "×"
-            deleteBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            deleteBtn.TextSize = 16
-            deleteBtn.Font = Enum.Font.GothamBold
-            deleteBtn.Parent = waypointButton
-            
-            local delCorner = Instance.new("UICorner")
-            delCorner.CornerRadius = UDim.new(0, 4)
-            delCorner.Parent = deleteBtn
-            
-            --// ANA BUTON TIKLAMA - DİREKT IŞINLANMA
-            waypointButton.MouseButton1Click:Connect(function()
-                -- Silme butonuna tıklanmadıysa ışınlan
-                if not deleteBtn:IsDescendantOf(waypointButton) then return end
-                
-                -- DİREKT IŞINLAN
-                teleportToPosition(cframe + Vector3.new(0, 2.5, 0))
-                
-                -- Görsel geri bildirim
-                waypointButton.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
-                infoLabel.Text = "🚀 Işınlanıldı: " .. name
-                infoLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
-                
-                task.wait(0.3)
-                waypointButton.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
-                infoLabel.Text = "Kayıtlı yere tıkla = Işınlan"
-                infoLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-            end)
-            
-            -- Silme event (X butonuna tıklanınca)
-            deleteBtn.MouseButton1Click:Connect(function()
-                savedWaypoints[name] = nil
-                updateWaypointList()
-                infoLabel.Text = "🗑️ Silindi: " .. name
-                infoLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-                
-                task.wait(0.5)
-                infoLabel.Text = "Kayıtlı yere tıkla = Işınlan"
-                infoLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-            end)
-            
-            -- Hover efektleri
-            waypointButton.MouseEnter:Connect(function()
-                waypointButton.BackgroundColor3 = Color3.fromRGB(70, 70, 100)
-            end)
-            waypointButton.MouseLeave:Connect(function()
-                waypointButton.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
-            end)
-        end
-        
-        -- Canvas size güncelle
-        local contentHeight = listLayout.AbsoluteContentSize.Y
-        scrollFrame.CanvasSize = UDim2.new(0, 0, 0, contentHeight + 10)
-    end
-    
-    -- Kaydet butonu
-    saveButton.MouseButton1Click:Connect(function()
-        local name = "Yer " .. (table.getn(savedWaypoints) + 1)
-        local counter = 1
-        while savedWaypoints[name] do
-            counter = counter + 1
-            name = "Yer " .. counter
-        end
-        
-        savedWaypoints[name] = humanoidRootPart.CFrame
-        updateWaypointList()
-        
-        infoLabel.Text = "✅ Kaydedildi: " .. name
-        infoLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-    end)
-    
-    -- Mouse teleport butonu
-    mouseTpButton.MouseButton1Click:Connect(function()
-        if mouse.Hit then
-            local pos = mouse.Hit.Position + Vector3.new(0, 2.5, 0)
-            teleportToPosition(CFrame.new(pos))
-            infoLabel.Text = "🖱️ Mouse konumuna gidildi"
-            infoLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-        end
-    end)
-    
-    -- Hover efektleri
-    saveButton.MouseEnter:Connect(function()
-        saveButton.BackgroundColor3 = Color3.fromRGB(30, 170, 255)
-    end)
-    saveButton.MouseLeave:Connect(function()
-        saveButton.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
-    end)
-    
-    mouseTpButton.MouseEnter:Connect(function()
-        mouseTpButton.BackgroundColor3 = Color3.fromRGB(30, 220, 120)
-    end)
-    mouseTpButton.MouseLeave:Connect(function()
-        mouseTpButton.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
-    end)
-    
-    -- İlk listeyi yükle
-    updateWaypointList()
-    
-    -- Açılış animasyonu
-    mainFrame.Size = UDim2.new(0, 0, 0, 0)
-    mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-    
-    local tween = TweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
-        Size = UDim2.new(0, 260, 0, 340),
-        Position = UDim2.new(0.5, -130, 0.5, -170)
-    })
-    tween:Play()
-    
-    currentWaypointGui = screenGui
-    return screenGui
+local function teleportTo(cframe)
+	if not cframe then return end
+	-- SADECE kalkış noktasında 1 partikül
+	spawnParticle(humanoidRootPart.Position)
+
+	humanoidRootPart.CFrame = cframe
 end
 
---// GUI Kapatma
-local function closeWaypointGui()
-    if currentWaypointGui then
-        local mainFrame = currentWaypointGui:FindFirstChild("MainFrame")
-        if mainFrame then
-            local tween = TweenService:Create(mainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
-                Size = UDim2.new(0, 0, 0, 0),
-                Position = UDim2.new(0.5, 0, 0.5, 0)
-            })
-            tween:Play()
-            tween.Completed:Wait()
-        end
-        currentWaypointGui:Destroy()
-        currentWaypointGui = nil
-    end
+-- ════════════════════════════════════════════
+--  FORWARD DECLARE
+-- ════════════════════════════════════════════
+local updateWaypointList
+
+-- ════════════════════════════════════════════
+--  ÖLÜM TESPİTİ
+--  Her respawn'da yeniden bağlanır
+-- ════════════════════════════════════════════
+local function connectDeathDetection()
+	humanoid.Died:Connect(function()
+		if not deathWaypointEnabled then return end
+
+		local pos  = humanoidRootPart.Position
+		local base = string.format("💀 Öldün: %d,%d,%d",
+			math.floor(pos.X), math.floor(pos.Y), math.floor(pos.Z))
+
+		local name, c = base, 1
+		while savedWaypoints[name] do
+			name = base .. "(" .. c .. ")"
+			c = c + 1
+		end
+
+		savedWaypoints[name] = CFrame.new(pos)
+		table.insert(waypointOrder, 1, name)
+		print("💀 Ölüm waypoint kaydedildi: " .. name)
+
+		-- GUI açıksa listeyi yenile
+		if currentGui then
+			updateWaypointList()
+		end
+	end)
 end
 
---// Tool Events
+-- ════════════════════════════════════════════
+--  İSİM DEĞİŞTİRME DIALOGU
+-- ════════════════════════════════════════════
+local function showRenameDialog(oldName, onConfirm)
+	if not currentGui then return end
+	local old = currentGui:FindFirstChild("RenameDialog")
+	if old then old:Destroy() end
+
+	local dialog = Instance.new("Frame")
+	dialog.Name            = "RenameDialog"
+	dialog.Size            = UDim2.new(0, 270, 0, 130)
+	dialog.Position        = UDim2.new(0.5, -135, 0.5, -65)
+	dialog.BackgroundColor3 = Color3.fromRGB(38, 38, 55)
+	dialog.BorderSizePixel = 0
+	dialog.ZIndex          = 200
+	dialog.Parent          = currentGui
+	Instance.new("UICorner", dialog).CornerRadius = UDim.new(0, 10)
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size               = UDim2.new(1,-20,0,28)
+	lbl.Position           = UDim2.new(0,10,0,8)
+	lbl.BackgroundTransparency = 1
+	lbl.Text               = "✏️ İsim Değiştir"
+	lbl.TextColor3         = Color3.fromRGB(255,255,255)
+	lbl.TextSize           = 14
+	lbl.Font               = Enum.Font.GothamBold
+	lbl.ZIndex             = 201
+	lbl.Parent             = dialog
+
+	local tb = Instance.new("TextBox")
+	tb.Size               = UDim2.new(1,-20,0,36)
+	tb.Position           = UDim2.new(0,10,0,40)
+	tb.BackgroundColor3   = Color3.fromRGB(55,55,78)
+	tb.BorderSizePixel    = 0
+	tb.Text               = oldName
+	tb.TextColor3         = Color3.fromRGB(255,255,255)
+	tb.TextSize           = 13
+	tb.Font               = Enum.Font.Gotham
+	tb.ClearTextOnFocus   = false
+	tb.ZIndex             = 201
+	tb.Parent             = dialog
+	Instance.new("UICorner", tb).CornerRadius = UDim.new(0,6)
+
+	local ok = Instance.new("TextButton")
+	ok.Size               = UDim2.new(0,110,0,28)
+	ok.Position           = UDim2.new(0,10,1,-36)
+	ok.BackgroundColor3   = Color3.fromRGB(0,200,100)
+	ok.BorderSizePixel    = 0
+	ok.Text               = "✓ Kaydet"
+	ok.TextColor3         = Color3.fromRGB(255,255,255)
+	ok.TextSize           = 12
+	ok.Font               = Enum.Font.GothamBold
+	ok.ZIndex             = 201
+	ok.Parent             = dialog
+	Instance.new("UICorner", ok).CornerRadius = UDim.new(0,6)
+
+	local cancel = Instance.new("TextButton")
+	cancel.Size           = UDim2.new(0,110,0,28)
+	cancel.Position       = UDim2.new(1,-120,1,-36)
+	cancel.BackgroundColor3 = Color3.fromRGB(220,60,60)
+	cancel.BorderSizePixel = 0
+	cancel.Text           = "✕ İptal"
+	cancel.TextColor3     = Color3.fromRGB(255,255,255)
+	cancel.TextSize       = 12
+	cancel.Font           = Enum.Font.GothamBold
+	cancel.ZIndex         = 201
+	cancel.Parent         = dialog
+	Instance.new("UICorner", cancel).CornerRadius = UDim.new(0,6)
+
+	tb:CaptureFocus()
+
+	local function doOk()
+		local newName = tb.Text:match("^%s*(.-)%s*$")
+		if newName ~= "" then onConfirm(newName) end
+		dialog:Destroy()
+	end
+	ok.MouseButton1Click:Connect(doOk)
+	cancel.MouseButton1Click:Connect(function() dialog:Destroy() end)
+	tb.FocusLost:Connect(function(enter) if enter then doOk() end end)
+end
+
+-- ════════════════════════════════════════════
+--  WAYPOINT LİSTESİ GÜNCELLE
+-- ════════════════════════════════════════════
+updateWaypointList = function()
+	if not currentGui then return end
+	local mainFrame  = currentGui:FindFirstChild("MainFrame")
+	if not mainFrame then return end
+	local scrollFrame = mainFrame:FindFirstChild("WaypointList")
+	local infoLabel   = mainFrame:FindFirstChild("InfoLabel")
+	if not scrollFrame then return end
+
+	-- Eski satırları temizle
+	for _, c in ipairs(scrollFrame:GetChildren()) do
+		if c:IsA("Frame") then c:Destroy() end
+	end
+
+	local function isDeathWp(n) return n:sub(1,4) == "💀 Ö" end
+	local function baseColor(n)  return isDeathWp(n) and Color3.fromRGB(80,50,50) or Color3.fromRGB(50,50,72) end
+	local function hoverColor(n) return isDeathWp(n) and Color3.fromRGB(105,68,68) or Color3.fromRGB(70,70,105) end
+
+	-- Geçerli waypoint listesi
+	local list = {}
+	for _, name in ipairs(waypointOrder) do
+		if savedWaypoints[name] then
+			table.insert(list, { name = name, cframe = savedWaypoints[name] })
+		end
+	end
+
+	for idx, data in ipairs(list) do
+		local row = Instance.new("Frame")
+		row.Name             = "WPRow_" .. idx
+		row.Size             = UDim2.new(1, -8, 0, 42)
+		row.BackgroundColor3 = baseColor(data.name)
+		row.BorderSizePixel  = 0
+		row.LayoutOrder      = idx
+		row.Parent           = scrollFrame
+		Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+
+		-- ☰ sürükleme tutamacı
+		local handle = Instance.new("TextLabel")
+		handle.Size               = UDim2.new(0,22,1,0)
+		handle.Position           = UDim2.new(0,3,0,0)
+		handle.BackgroundTransparency = 1
+		handle.Text               = "☰"
+		handle.TextColor3         = Color3.fromRGB(160,160,160)
+		handle.TextSize           = 14
+		handle.Parent             = row
+
+		-- İsim butonu
+		local namebtn = Instance.new("TextButton")
+		namebtn.Size             = UDim2.new(1,-68,1,0)
+		namebtn.Position         = UDim2.new(0,26,0,0)
+		namebtn.BackgroundTransparency = 1
+		namebtn.Text             = "🚀 " .. data.name
+		namebtn.TextColor3       = Color3.fromRGB(235,235,235)
+		namebtn.TextSize         = 12
+		namebtn.Font             = Enum.Font.GothamBold
+		namebtn.TextXAlignment   = Enum.TextXAlignment.Left
+		namebtn.TextTruncate     = Enum.TextTruncate.AtEnd
+		namebtn.Parent           = row
+
+		-- ✏️ düzenle
+		local editbtn = Instance.new("TextButton")
+		editbtn.Size             = UDim2.new(0,28,0,28)
+		editbtn.Position         = UDim2.new(1,-62,0,7)
+		editbtn.BackgroundColor3 = Color3.fromRGB(90,140,255)
+		editbtn.BorderSizePixel  = 0
+		editbtn.Text             = "✏️"
+		editbtn.TextSize         = 12
+		editbtn.Font             = Enum.Font.GothamBold
+		editbtn.Parent           = row
+		Instance.new("UICorner", editbtn).CornerRadius = UDim.new(0,4)
+
+		-- × sil
+		local delbtn = Instance.new("TextButton")
+		delbtn.Size              = UDim2.new(0,28,0,28)
+		delbtn.Position          = UDim2.new(1,-30,0,7)
+		delbtn.BackgroundColor3  = Color3.fromRGB(220,60,60)
+		delbtn.BorderSizePixel   = 0
+		delbtn.Text              = "×"
+		delbtn.TextColor3        = Color3.fromRGB(255,255,255)
+		delbtn.TextSize          = 18
+		delbtn.Font              = Enum.Font.GothamBold
+		delbtn.Parent            = row
+		Instance.new("UICorner", delbtn).CornerRadius = UDim.new(0,4)
+
+		-- Hover
+		row.MouseEnter:Connect(function()  row.BackgroundColor3 = hoverColor(data.name) end)
+		row.MouseLeave:Connect(function()  row.BackgroundColor3 = baseColor(data.name)  end)
+
+		-- TEK / ÇİFT TIK
+		local lastClick = 0
+		namebtn.MouseButton1Click:Connect(function()
+			local now = tick()
+			if (now - lastClick) < 0.35 then
+				-- Çift tık → isim değiştir
+				showRenameDialog(data.name, function(newName)
+					if newName == data.name then return end
+					if savedWaypoints[newName] then
+						if infoLabel then infoLabel.Text = "❌ Bu isim zaten var!" end
+						return
+					end
+					savedWaypoints[newName] = savedWaypoints[data.name]
+					savedWaypoints[data.name] = nil
+					for i,n in ipairs(waypointOrder) do
+						if n == data.name then waypointOrder[i] = newName; break end
+					end
+					updateWaypointList()
+				end)
+			else
+				-- Tek tık → ışınlan
+				teleportTo(data.cframe + Vector3.new(0, 2.5, 0))
+				row.BackgroundColor3 = Color3.fromRGB(0,200,100)
+				if infoLabel then
+					infoLabel.Text      = "🚀 Işınlanıldı: " .. data.name
+					infoLabel.TextColor3 = Color3.fromRGB(0,255,110)
+				end
+				task.delay(0.5, function()
+					if row and row.Parent then
+						row.BackgroundColor3 = baseColor(data.name)
+					end
+					if infoLabel and infoLabel.Parent then
+						infoLabel.Text       = "🖱️ Tek=Işınlan  ✏️ Çift=İsim  ☰ Sürükle=Sırala"
+						infoLabel.TextColor3 = Color3.fromRGB(100,255,100)
+					end
+				end)
+			end
+			lastClick = now
+		end)
+
+		-- ✏️ butonu
+		editbtn.MouseButton1Click:Connect(function()
+			showRenameDialog(data.name, function(newName)
+				if newName == data.name then return end
+				if savedWaypoints[newName] then
+					if infoLabel then infoLabel.Text = "❌ Bu isim zaten var!" end
+					return
+				end
+				savedWaypoints[newName] = savedWaypoints[data.name]
+				savedWaypoints[data.name] = nil
+				for i,n in ipairs(waypointOrder) do
+					if n == data.name then waypointOrder[i] = newName; break end
+				end
+				updateWaypointList()
+			end)
+		end)
+
+		-- × sil
+		delbtn.MouseButton1Click:Connect(function()
+			savedWaypoints[data.name] = nil
+			for i,n in ipairs(waypointOrder) do
+				if n == data.name then table.remove(waypointOrder,i); break end
+			end
+			updateWaypointList()
+			if infoLabel then
+				infoLabel.Text       = "🗑️ Silindi: " .. data.name
+				infoLabel.TextColor3 = Color3.fromRGB(255,150,100)
+			end
+		end)
+
+		-- ☰ SÜRÜKLEME (sıralama)
+		local draggingWP = false
+		local wpDragY    = 0
+
+		handle.InputBegan:Connect(function(inp)
+			if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+				draggingWP = true
+				wpDragY    = inp.Position.Y
+				row.BackgroundColor3 = Color3.fromRGB(100,100,165)
+			end
+		end)
+
+		UserInputService.InputChanged:Connect(function(inp)
+			if draggingWP and inp.UserInputType == Enum.UserInputType.MouseMovement then
+				row.Position = UDim2.new(0, 0, 0, inp.Position.Y - wpDragY)
+			end
+		end)
+
+		UserInputService.InputEnded:Connect(function(inp)
+			if draggingWP and inp.UserInputType == Enum.UserInputType.MouseButton1 then
+				draggingWP = false
+				row.Position = UDim2.new(0,0,0,0)
+				row.BackgroundColor3 = baseColor(data.name)
+
+				local absY  = scrollFrame.AbsolutePosition.Y
+				local mouseY = UserInputService:GetMouseLocation().Y
+				local relY   = mouseY - absY + scrollFrame.CanvasPosition.Y
+				local target = math.clamp(math.ceil(relY / 47), 1, #list)
+				if target ~= idx then
+					table.remove(waypointOrder, idx)
+					table.insert(waypointOrder, target, data.name)
+				end
+				updateWaypointList()
+			end
+		end)
+	end
+
+	-- Canvas boyutunu güncelle
+	local lay = scrollFrame:FindFirstChildOfClass("UIListLayout")
+	if lay then
+		scrollFrame.CanvasSize = UDim2.new(0,0,0, lay.AbsoluteContentSize.Y + 10)
+	end
+end
+
+-- ════════════════════════════════════════════
+--  GUI OLUŞTUR
+-- ════════════════════════════════════════════
+local function createGui()
+	if currentGui then currentGui:Destroy(); currentGui = nil end
+
+	local sg = Instance.new("ScreenGui")
+	sg.Name          = "WaypointGui"
+	sg.ResetOnSpawn  = false
+	sg.Parent        = player:WaitForChild("PlayerGui")
+
+	-- Ana çerçeve
+	local mf = Instance.new("Frame")
+	mf.Name             = "MainFrame"
+	mf.Size             = UDim2.new(0,320,0,465)
+	mf.Position         = UDim2.new(0.5,-160,0.5,-232)
+	mf.BackgroundColor3 = Color3.fromRGB(22,22,33)
+	mf.BorderSizePixel  = 0
+	mf.Active           = true
+	mf.Parent           = sg
+	Instance.new("UICorner", mf).CornerRadius = UDim.new(0,10)
+
+	-- Başlık barı
+	local bar = Instance.new("Frame")
+	bar.Name             = "DragBar"
+	bar.Size             = UDim2.new(1,0,0,42)
+	bar.BackgroundColor3 = Color3.fromRGB(38,38,58)
+	bar.BorderSizePixel  = 0
+	bar.Active           = true
+	bar.Parent           = mf
+	Instance.new("UICorner", bar).CornerRadius = UDim.new(0,10)
+
+	local titleLbl = Instance.new("TextLabel")
+	titleLbl.Size               = UDim2.new(1,-100,1,0)
+	titleLbl.Position           = UDim2.new(0,12,0,0)
+	titleLbl.BackgroundTransparency = 1
+	titleLbl.Text               = "📍 Waypoints"
+	titleLbl.TextColor3         = Color3.fromRGB(255,255,255)
+	titleLbl.TextSize           = 16
+	titleLbl.Font               = Enum.Font.GothamBold
+	titleLbl.TextXAlignment     = Enum.TextXAlignment.Left
+	titleLbl.Parent             = bar
+
+	-- Kapatma (X)
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Size             = UDim2.new(0,30,0,30)
+	closeBtn.Position         = UDim2.new(1,-36,0,6)
+	closeBtn.BackgroundColor3 = Color3.fromRGB(220,55,55)
+	closeBtn.BorderSizePixel  = 0
+	closeBtn.Text             = "X"
+	closeBtn.TextColor3       = Color3.fromRGB(255,255,255)
+	closeBtn.TextSize         = 13
+	closeBtn.Font             = Enum.Font.GothamBold
+	closeBtn.Parent           = bar
+	Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0,6)
+
+	closeBtn.MouseButton1Click:Connect(function()
+		if currentGui then
+			currentGui:Destroy()
+			currentGui = nil
+		end
+	end)
+
+	-- Bilgi satırı
+	local infoLbl = Instance.new("TextLabel")
+	infoLbl.Name               = "InfoLabel"
+	infoLbl.Size               = UDim2.new(1,-20,0,24)
+	infoLbl.Position           = UDim2.new(0,10,0,46)
+	infoLbl.BackgroundTransparency = 1
+	infoLbl.Text               = "🖱️ Tek=Işınlan  ✏️ Çift=İsim  ☰ Sürükle=Sırala"
+	infoLbl.TextColor3         = Color3.fromRGB(100,255,100)
+	infoLbl.TextSize           = 9.5
+	infoLbl.Font               = Enum.Font.Gotham
+	infoLbl.TextWrapped        = true
+	infoLbl.Parent             = mf
+
+	-- Ölüm waypoint toggle satırı
+	local deathRow = Instance.new("Frame")
+	deathRow.Size             = UDim2.new(1,-20,0,30)
+	deathRow.Position         = UDim2.new(0,10,0,73)
+	deathRow.BackgroundColor3 = Color3.fromRGB(33,33,50)
+	deathRow.BorderSizePixel  = 0
+	deathRow.Parent           = mf
+	Instance.new("UICorner", deathRow).CornerRadius = UDim.new(0,6)
+
+	local deathLbl = Instance.new("TextLabel")
+	deathLbl.Size               = UDim2.new(0.55,0,1,0)
+	deathLbl.Position           = UDim2.new(0,10,0,0)
+	deathLbl.BackgroundTransparency = 1
+	deathLbl.Text               = "💀 Ölüm Waypoint:"
+	deathLbl.TextColor3         = Color3.fromRGB(210,210,210)
+	deathLbl.TextSize           = 12
+	deathLbl.Font               = Enum.Font.GothamBold
+	deathLbl.TextXAlignment     = Enum.TextXAlignment.Left
+	deathLbl.Parent             = deathRow
+
+	local function deathBtnColor() return deathWaypointEnabled and Color3.fromRGB(0,200,100) or Color3.fromRGB(200,55,55) end
+	local function deathBtnText()  return deathWaypointEnabled and "✓ AÇIK" or "✗ KAPALI" end
+
+	local deathToggle = Instance.new("TextButton")
+	deathToggle.Size             = UDim2.new(0,85,0,22)
+	deathToggle.Position         = UDim2.new(1,-93,0,4)
+	deathToggle.BackgroundColor3 = deathBtnColor()
+	deathToggle.BorderSizePixel  = 0
+	deathToggle.Text             = deathBtnText()
+	deathToggle.TextColor3       = Color3.fromRGB(255,255,255)
+	deathToggle.TextSize         = 11
+	deathToggle.Font             = Enum.Font.GothamBold
+	deathToggle.Parent           = deathRow
+	Instance.new("UICorner", deathToggle).CornerRadius = UDim.new(0,5)
+
+	deathToggle.MouseButton1Click:Connect(function()
+		deathWaypointEnabled        = not deathWaypointEnabled
+		deathToggle.BackgroundColor3 = deathBtnColor()
+		deathToggle.Text             = deathBtnText()
+		infoLbl.Text      = deathWaypointEnabled and "💀 Ölüm waypoint AÇIK" or "💀 Ölüm waypoint KAPALI"
+		infoLbl.TextColor3 = deathWaypointEnabled and Color3.fromRGB(100,255,100) or Color3.fromRGB(255,100,100)
+		task.delay(2, function()
+			if infoLbl and infoLbl.Parent then
+				infoLbl.Text       = "🖱️ Tek=Işınlan  ✏️ Çift=İsim  ☰ Sürükle=Sırala"
+				infoLbl.TextColor3 = Color3.fromRGB(100,255,100)
+			end
+		end)
+	end)
+
+	-- Scroll (waypoint listesi)
+	local scroll = Instance.new("ScrollingFrame")
+	scroll.Name                  = "WaypointList"
+	scroll.Size                  = UDim2.new(1,-20,0,220)
+	scroll.Position              = UDim2.new(0,10,0,107)
+	scroll.BackgroundColor3      = Color3.fromRGB(33,33,50)
+	scroll.BorderSizePixel       = 0
+	scroll.ScrollBarThickness    = 4
+	scroll.ScrollBarImageColor3  = Color3.fromRGB(100,100,155)
+	scroll.CanvasSize            = UDim2.new(0,0,0,0)
+	scroll.Parent                = mf
+	Instance.new("UICorner", scroll).CornerRadius = UDim.new(0,6)
+
+	local lay = Instance.new("UIListLayout")
+	lay.Padding     = UDim.new(0,5)
+	lay.SortOrder   = Enum.SortOrder.LayoutOrder
+	lay.Parent      = scroll
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingTop   = UDim.new(0,5)
+	pad.PaddingLeft  = UDim.new(0,5)
+	pad.PaddingRight = UDim.new(0,5)
+	pad.Parent       = scroll
+
+	-- ➕ Kaydet butonu
+	local saveBtn = Instance.new("TextButton")
+	saveBtn.Name             = "SaveButton"
+	saveBtn.Size             = UDim2.new(1,-20,0,40)
+	saveBtn.Position         = UDim2.new(0,10,0,334)
+	saveBtn.BackgroundColor3 = Color3.fromRGB(0,145,255)
+	saveBtn.BorderSizePixel  = 0
+	saveBtn.Text             = "➕  Mevcut Konumu Kaydet"
+	saveBtn.TextColor3       = Color3.fromRGB(255,255,255)
+	saveBtn.TextSize         = 13
+	saveBtn.Font             = Enum.Font.GothamBold
+	saveBtn.Parent           = mf
+	Instance.new("UICorner", saveBtn).CornerRadius = UDim.new(0,6)
+
+	saveBtn.MouseButton1Click:Connect(function()
+		local c, name = 1, "Yer 1"
+		while savedWaypoints[name] do c=c+1; name="Yer "..c end
+		savedWaypoints[name] = humanoidRootPart.CFrame
+		table.insert(waypointOrder, name)
+		updateWaypointList()
+		infoLbl.Text       = "✅ Kaydedildi: " .. name
+		infoLbl.TextColor3 = Color3.fromRGB(100,255,100)
+		task.delay(2, function()
+			if infoLbl and infoLbl.Parent then
+				infoLbl.Text       = "🖱️ Tek=Işınlan  ✏️ Çift=İsim  ☰ Sürükle=Sırala"
+				infoLbl.TextColor3 = Color3.fromRGB(100,255,100)
+			end
+		end)
+	end)
+
+	saveBtn.MouseEnter:Connect(function() saveBtn.BackgroundColor3 = Color3.fromRGB(25,165,255) end)
+	saveBtn.MouseLeave:Connect(function() saveBtn.BackgroundColor3 = Color3.fromRGB(0,145,255)  end)
+
+	-- 🗑️ Tümünü temizle
+	local clearBtn = Instance.new("TextButton")
+	clearBtn.Name             = "ClearButton"
+	clearBtn.Size             = UDim2.new(1,-20,0,30)
+	clearBtn.Position         = UDim2.new(0,10,0,380)
+	clearBtn.BackgroundColor3 = Color3.fromRGB(85,85,108)
+	clearBtn.BorderSizePixel  = 0
+	clearBtn.Text             = "🗑️  Tüm Waypointleri Temizle"
+	clearBtn.TextColor3       = Color3.fromRGB(255,255,255)
+	clearBtn.TextSize         = 11
+	clearBtn.Font             = Enum.Font.GothamBold
+	clearBtn.Parent           = mf
+	Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0,6)
+
+	clearBtn.MouseButton1Click:Connect(function()
+		savedWaypoints = {}
+		waypointOrder  = {}
+		updateWaypointList()
+		infoLbl.Text       = "🗑️ Tüm waypointler temizlendi"
+		infoLbl.TextColor3 = Color3.fromRGB(255,150,100)
+	end)
+
+	clearBtn.MouseEnter:Connect(function() clearBtn.BackgroundColor3 = Color3.fromRGB(108,108,135) end)
+	clearBtn.MouseLeave:Connect(function() clearBtn.BackgroundColor3 = Color3.fromRGB(85,85,108)   end)
+
+	-- ════ ANA ÇERÇEVE SÜRÜKLEME ════
+	local frameDragging = false
+	local frameDragStart = Vector2.zero
+	local framePosStart  = UDim2.new()
+
+	bar.InputBegan:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+			frameDragging  = true
+			frameDragStart = Vector2.new(inp.Position.X, inp.Position.Y)
+			framePosStart  = mf.Position
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(inp)
+		if frameDragging and inp.UserInputType == Enum.UserInputType.MouseMovement then
+			local d = Vector2.new(inp.Position.X, inp.Position.Y) - frameDragStart
+			mf.Position = UDim2.new(
+				framePosStart.X.Scale, framePosStart.X.Offset + d.X,
+				framePosStart.Y.Scale, framePosStart.Y.Offset + d.Y
+			)
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+			frameDragging = false
+		end
+	end)
+
+	-- İlk listeyi yükle
+	currentGui = sg
+	updateWaypointList()
+
+	-- Açılış animasyonu
+	mf.Size     = UDim2.new(0,0,0,0)
+	mf.Position = UDim2.new(0.5,0,0.5,0)
+	TweenService:Create(mf, TweenInfo.new(0.28, Enum.EasingStyle.Back), {
+		Size     = UDim2.new(0,320,0,465),
+		Position = UDim2.new(0.5,-160,0.5,-232)
+	}):Play()
+end
+
+-- ════════════════════════════════════════════
+--  TOOL EQUIP / UNEQUIP
+--  Airwalk: eline alınca AÇILIR, bırakınca KAPANIR
+-- ════════════════════════════════════════════
 tool.Equipped:Connect(function()
-    createWaypointGui()
+	createGui()
+	airwalkStart()       -- OTOMATİK AÇ
 end)
 
 tool.Unequipped:Connect(function()
-    closeWaypointGui()
+	airwalkEnd()         -- OTOMATİK KAPAT
+	if currentGui then
+		currentGui:Destroy()
+		currentGui = nil
+	end
 end)
 
---// Tool Activated - Artık sadece mouse'a ışınlanma (opsiyonel)
+-- Tıkla → mouse konumuna ışınlan
 tool.Activated:Connect(function()
-    if mouse.Hit then
-        local pos = mouse.Hit.Position + Vector3.new(0, 2.5, 0)
-        teleportToPosition(CFrame.new(pos))
-    end
+	if mouse.Hit then
+		teleportTo(CFrame.new(mouse.Hit.Position + Vector3.new(0, 2.5, 0)))
+	end
 end)
 
---// Karakter yeniden spawn
-player.CharacterAdded:Connect(function(newCharacter)
-    character = newCharacter
-    humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-    tool.Parent = player.Backpack
+-- E tuşu → airwalk toggle (GUI açıkken)
+UserInputService.InputBegan:Connect(function(inp, gp)
+	if gp then return end
+	if inp.KeyCode ~= Enum.KeyCode.E then return end
+	if not currentGui then return end
+
+	if airwalking then airwalkEnd() else airwalkStart() end
 end)
 
---// Tool'u envantere ekle
+-- ════════════════════════════════════════════
+--  RESPAWN
+-- ════════════════════════════════════════════
+player.CharacterAdded:Connect(function(newChar)
+	refreshCharacter(newChar)
+
+	-- Eğer airwalk aktifse platformu yeniden oluştur
+	if airwalking then
+		airwalking = false           -- sıfırla ki airwalkStart çalışsın
+		airwalkPlatform = nil
+		task.wait(0.3)
+		airwalkStart()
+	end
+
+	-- Aynı tool'u backpack'e koy (çoğalmadan)
+	task.wait(0.1)
+	if not player.Backpack:FindFirstChild(tool.Name)
+		and tool.Parent ~= newChar then
+		tool.Parent = player.Backpack
+	end
+
+	-- Yeni humanoid için ölüm tespiti
+	connectDeathDetection()
+end)
+
+-- ════════════════════════════════════════════
+--  BAŞLAT
+-- ════════════════════════════════════════════
+connectDeathDetection()
 tool.Parent = player.Backpack
 
-print("✅ Waypoint sistemi yüklendi!")
-print("📌 Kullanım:")
-print("   • Tool'u eline al → GUI açılır")
-print("   • Kaydedilmiş yere TEK TIKLA → DİREKT IŞINLAN")
-print("   • 'Mevcut Konumu Kaydet' → Yeni yer ekle")
-print("   • 'Mouse Konumuna Git' → Serbest teleport")
-print("   • X butonu → Waypoint sil")
+print("✅ WaypointSystem v3 yüklendi!")
+print("  ✈️  Tool eline al → Airwalk OTOMATİK açılır")
+print("  ✈️  Tool bırak   → Airwalk OTOMATİK kapanır")
+print("  E   → Airwalk manuel toggle (GUI açıkken)")
+print("  🖱️  Tool tıkla  → Mouse'a ışınlan")
+print("  ➕  → Konumu kaydet")
+print("  Tek tık → Waypoint'e ışınlan")
+print("  Çift tık / ✏️ → İsim değiştir")
+print("  💀  Toggle → Ölüm waypoint kaydı aç/kapat")
+print("  Waypointler respawn'da kaybolmaz ✅")
+
