@@ -1,0 +1,1064 @@
+-- ╔══════════════════════════════════════════════════════════╗
+-- ║          🌙 LUNA BOT v4.1 — TAM BİRLEŞİK               ║
+-- ║   StarterPlayerScripts > LocalScript olarak ekle       ║
+-- ╚══════════════════════════════════════════════════════════╝
+
+local Players           = game:GetService("Players")
+local TeleportService   = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer       = Players.LocalPlayer
+
+local MEVCUT_JOB_ID   = game.JobId
+local MEVCUT_PLACE_ID = game.PlaceId
+
+-- ════════════════════════════════════════════════════
+-- RENK PALETİ
+-- ════════════════════════════════════════════════════
+local C = {
+    BG        = Color3.fromRGB(8,   8,  18),
+    BG2       = Color3.fromRGB(14,  14, 30),
+    BG3       = Color3.fromRGB(20,  20, 45),
+    BG4       = Color3.fromRGB(26,  26, 55),
+    TITLE_BAR = Color3.fromRGB(16,  16, 38),
+    PURPLE    = Color3.fromRGB(167, 139, 250),
+    PURPLE_DK = Color3.fromRGB(76,  29, 149),
+    PURPLE_LT = Color3.fromRGB(200, 180, 255),
+    GREEN     = Color3.fromRGB(34,  197, 94),
+    GREEN_DK  = Color3.fromRGB(10,  60,  25),
+    RED       = Color3.fromRGB(220, 80,  80),
+    RED_DK    = Color3.fromRGB(40,  12,  12),
+    ORANGE    = Color3.fromRGB(251, 146, 60),
+    TEXT      = Color3.fromRGB(210, 210, 240),
+    MUTED     = Color3.fromRGB(90,  90,  130),
+    WHITE     = Color3.fromRGB(255, 255, 255),
+    GOLD      = Color3.fromRGB(250, 200, 80),
+    BLUE      = Color3.fromRGB(96,  165, 250),
+}
+
+-- ════════════════════════════════════════════════════
+-- YARDIMCI FONKSİYONLAR
+-- ════════════════════════════════════════════════════
+local function corner(parent, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, radius or 8)
+    c.Parent = parent
+end
+
+local function stroke(parent, color, thickness)
+    local s = Instance.new("UIStroke")
+    s.Color     = color or Color3.fromRGB(50, 50, 80)
+    s.Thickness = thickness or 1
+    s.Parent    = parent
+end
+
+local function padding(parent, px, py)
+    local p  = Instance.new("UIPadding")
+    local ux = UDim.new(0, px)
+    local uy = UDim.new(0, py or px)
+    p.PaddingLeft   = ux
+    p.PaddingRight  = ux
+    p.PaddingTop    = uy
+    p.PaddingBottom = uy
+    p.Parent = parent
+end
+
+local function label(parent, props)
+    local l = Instance.new("TextLabel")
+    l.BackgroundTransparency = 1
+    l.Font           = props.font  or Enum.Font.Gotham
+    l.TextSize       = props.size  or 12
+    l.TextColor3     = props.color or C.TEXT
+    l.Text           = props.text  or ""
+    l.TextXAlignment = props.align or Enum.TextXAlignment.Left
+    l.TextTruncate   = props.wrap and Enum.TextTruncate.None or Enum.TextTruncate.AtEnd
+    l.TextWrapped    = props.wrap  or false
+    l.Size           = props.sz    or UDim2.new(1, 0, 0, 16)
+    l.Position       = props.pos   or UDim2.new(0, 0, 0, 0)
+    l.Parent         = parent
+    return l
+end
+
+local function button(parent, props)
+    local b = Instance.new("TextButton")
+    b.BackgroundColor3 = props.bg    or C.BG3
+    b.BorderSizePixel  = 0
+    b.Text             = props.text  or ""
+    b.TextColor3       = props.color or C.PURPLE
+    b.Font             = props.font  or Enum.Font.GothamBold
+    b.TextSize         = props.size  or 12
+    b.AutoButtonColor  = false
+    b.Size             = props.sz    or UDim2.new(1, 0, 0, 32)
+    b.Position         = props.pos   or UDim2.new(0, 0, 0, 0)
+    b.Parent           = parent
+    corner(b, props.radius or 8)
+    local hoverBg  = props.hoverBg or C.PURPLE_DK
+    local normalBg = props.bg      or C.BG3
+    b.MouseEnter:Connect(function() b.BackgroundColor3 = hoverBg  end)
+    b.MouseLeave:Connect(function() b.BackgroundColor3 = normalBg end)
+    return b
+end
+
+local function badge(parent, txt, bg, fg, xOff, yOff)
+    local f = Instance.new("Frame")
+    f.Size             = UDim2.new(0, 56, 0, 18)
+    f.Position         = UDim2.new(1, xOff or -64, 0, yOff or 6)
+    f.BackgroundColor3 = bg or C.BG3
+    f.BorderSizePixel  = 0
+    f.Parent           = parent
+    corner(f, 6)
+    local l = Instance.new("TextLabel")
+    l.Size             = UDim2.new(1, 0, 1, 0)
+    l.BackgroundTransparency = 1
+    l.Text             = txt
+    l.TextColor3       = fg or C.TEXT
+    l.Font             = Enum.Font.GothamSemibold
+    l.TextSize         = 9
+    l.Parent           = f
+    return f, l
+end
+
+-- ════════════════════════════════════════════════════
+-- ANA GUI
+-- ════════════════════════════════════════════════════
+local sg = Instance.new("ScreenGui")
+sg.Name           = "LunaBotV41"
+sg.ResetOnSpawn   = false
+sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+sg.Parent         = LocalPlayer.PlayerGui
+
+local panel = Instance.new("Frame")
+panel.Name             = "Panel"
+panel.Size             = UDim2.new(0, 340, 0, 580)
+panel.Position         = UDim2.new(0.5, -170, 0.5, -290)
+panel.BackgroundColor3 = C.BG
+panel.BorderSizePixel  = 0
+panel.ClipsDescendants = true
+panel.Parent           = sg
+corner(panel, 14)
+stroke(panel, Color3.fromRGB(40, 30, 80), 1.5)
+
+-- ── BAŞLIK ÇUBUĞU ──────────────────────────────────
+local titleBar = Instance.new("Frame")
+titleBar.Size             = UDim2.new(1, 0, 0, 44)
+titleBar.BackgroundColor3 = C.TITLE_BAR
+titleBar.BorderSizePixel  = 0
+titleBar.Parent           = panel
+corner(titleBar, 14)
+
+-- Alt kenarı düzeltme şeridi
+local titleFix = Instance.new("Frame")
+titleFix.Size             = UDim2.new(1, 0, 0, 14)
+titleFix.Position         = UDim2.new(0, 0, 1, -14)
+titleFix.BackgroundColor3 = C.TITLE_BAR
+titleFix.BorderSizePixel  = 0
+titleFix.Parent           = titleBar
+
+label(titleBar, {
+    text  = "🌙 Luna Bot  v4.1",
+    font  = Enum.Font.GothamBold,
+    size  = 14,
+    color = C.PURPLE,
+    sz    = UDim2.new(1, -90, 1, 0),
+    pos   = UDim2.new(0, 14, 0, 0),
+})
+
+-- Kapat
+local closeBtn = button(titleBar, {
+    text    = "✕",
+    bg      = Color3.fromRGB(50, 15, 15),
+    color   = C.RED,
+    hoverBg = Color3.fromRGB(90, 20, 20),
+    sz      = UDim2.new(0, 28, 0, 28),
+    pos     = UDim2.new(1, -36, 0.5, -14),
+    size    = 13,
+})
+closeBtn.MouseButton1Click:Connect(function()
+    panel.Visible = not panel.Visible
+end)
+
+-- Küçült
+local minimizeBtn = button(titleBar, {
+    text    = "—",
+    bg      = C.BG3,
+    color   = C.MUTED,
+    hoverBg = C.BG2,
+    sz      = UDim2.new(0, 28, 0, 28),
+    pos     = UDim2.new(1, -68, 0.5, -14),
+    size    = 13,
+})
+local minimized = false
+minimizeBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    panel.Size       = minimized and UDim2.new(0, 340, 0, 44) or UDim2.new(0, 340, 0, 580)
+    minimizeBtn.Text = minimized and "□" or "—"
+end)
+
+-- Sürükleme
+local drag, dragStart, startPos
+titleBar.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then
+        drag = true; dragStart = i.Position; startPos = panel.Position
+    end
+end)
+titleBar.InputChanged:Connect(function(i)
+    if drag and i.UserInputType == Enum.UserInputType.MouseMovement then
+        local d = i.Position - dragStart
+        panel.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
+                                    startPos.Y.Scale, startPos.Y.Offset + d.Y)
+    end
+end)
+titleBar.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end
+end)
+
+-- ── SEKME ÇUBUĞU ────────────────────────────────────
+local tabBar = Instance.new("Frame")
+tabBar.Size             = UDim2.new(1, -12, 0, 32)
+tabBar.Position         = UDim2.new(0, 6, 0, 48)
+tabBar.BackgroundColor3 = C.BG2
+tabBar.BorderSizePixel  = 0
+tabBar.Parent           = panel
+corner(tabBar, 8)
+
+local tabLayout = Instance.new("UIListLayout")
+tabLayout.FillDirection     = Enum.FillDirection.Horizontal
+tabLayout.Padding           = UDim.new(0, 3)
+tabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+tabLayout.Parent            = tabBar
+padding(tabBar, 4)
+
+local TAB_NAMES = { "Eventler", "SrvHop", "Kayıtlı", "Kaydet" }
+local TAB_ICONS = { "🎯", "🔀", "💾", "➕" }
+local tabBtns   = {}
+local tabPages  = {}
+
+local pageContainer = Instance.new("Frame")
+pageContainer.Size                   = UDim2.new(1, -12, 1, -92)
+pageContainer.Position               = UDim2.new(0, 6, 0, 84)
+pageContainer.BackgroundTransparency = 1
+pageContainer.ClipsDescendants       = true
+pageContainer.Parent                 = panel
+
+local function switchTab(idx)
+    for i, btn in ipairs(tabBtns) do
+        if i == idx then
+            btn.BackgroundTransparency = 0
+            btn.BackgroundColor3       = C.PURPLE_DK
+            btn.TextColor3             = C.WHITE
+        else
+            btn.BackgroundTransparency = 1
+            btn.TextColor3             = C.MUTED
+        end
+    end
+    for i, page in ipairs(tabPages) do
+        page.Visible = (i == idx)
+    end
+end
+
+for i, name in ipairs(TAB_NAMES) do
+    local tb = Instance.new("TextButton")
+    tb.Size                   = UDim2.new(0.23, -3, 1, 0)
+    tb.BackgroundColor3       = C.PURPLE_DK
+    tb.BackgroundTransparency = 1
+    tb.BorderSizePixel        = 0
+    tb.Text                   = TAB_ICONS[i] .. " " .. name
+    tb.TextColor3             = C.MUTED
+    tb.Font                   = Enum.Font.GothamSemibold
+    tb.TextSize               = 10
+    tb.AutoButtonColor        = false
+    tb.Parent                 = tabBar
+    corner(tb, 6)
+    tb.MouseButton1Click:Connect(function() switchTab(i) end)
+    tabBtns[i] = tb
+
+    local page = Instance.new("Frame")
+    page.Size                   = UDim2.new(1, 0, 1, 0)
+    page.BackgroundTransparency = 1
+    page.Visible                = (i == 1)
+    page.Parent                 = pageContainer
+    tabPages[i] = page
+end
+
+-- Durum çubuğu
+local statusLbl = label(panel, {
+    text  = "",
+    color = C.GREEN,
+    size  = 11,
+    sz    = UDim2.new(1, -12, 0, 18),
+    pos   = UDim2.new(0, 12, 1, -22),
+})
+
+local function setStatus(msg, isError)
+    statusLbl.Text       = msg
+    statusLbl.TextColor3 = isError and C.RED or C.GREEN
+    task.delay(5, function()
+        if statusLbl.Text == msg then statusLbl.Text = "" end
+    end)
+end
+
+-- ════════════════════════════════════════════════════
+-- TAB 1: EVENTLER
+-- ════════════════════════════════════════════════════
+local eventPage = tabPages[1]
+
+local eventScroll = Instance.new("ScrollingFrame")
+eventScroll.Size                = UDim2.new(1, 0, 1, 0)
+eventScroll.BackgroundTransparency = 1
+eventScroll.BorderSizePixel     = 0
+eventScroll.ScrollBarThickness  = 3
+eventScroll.ScrollBarImageColor3 = C.PURPLE_DK
+eventScroll.CanvasSize          = UDim2.new(0, 0, 0, 0)
+eventScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+eventScroll.Parent              = eventPage
+
+local eventLayout = Instance.new("UIListLayout")
+eventLayout.Padding = UDim.new(0, 6)
+eventLayout.Parent  = eventScroll
+padding(eventScroll, 3)
+
+local EVENT_LIST = {
+    {
+        isim    = "🔐 The Secret Place",
+        placeId = 1930665568,
+        renk    = Color3.fromRGB(40, 20, 70),
+        aciklama = "Gizli etkinlik alanı",
+    },
+    {
+        isim    = "🥚 Paskalya Event",
+        placeId = 1930863474,
+        renk    = Color3.fromRGB(60, 45, 10),
+        aciklama = "Paskalya yumurtası avı",
+    },
+    {
+        isim    = "❄️ Winter Place",
+        placeId = 1930866268,
+        renk    = Color3.fromRGB(10, 40, 70),
+        aciklama = "Kış temalı özel alan",
+    },
+}
+
+-- Event kartları + oyuncu sayısı badge'i
+local eventBadgeLabels = {}  -- güncelleme için sakla
+
+for _, ev in ipairs(EVENT_LIST) do
+    local kart = Instance.new("TextButton")
+    kart.Size             = UDim2.new(1, -6, 0, 68)
+    kart.BackgroundColor3 = C.BG2
+    kart.BorderSizePixel  = 0
+    kart.Text             = ""
+    kart.AutoButtonColor  = false
+    kart.Parent           = eventScroll
+    corner(kart, 10)
+    stroke(kart, Color3.fromRGB(30, 25, 60))
+
+    -- Sol renkli şerit
+    local serit = Instance.new("Frame")
+    serit.Size             = UDim2.new(0, 3, 1, 0)
+    serit.BackgroundColor3 = ev.renk
+    serit.BorderSizePixel  = 0
+    serit.Parent           = kart
+    corner(serit, 3)
+
+    label(kart, {
+        text  = ev.isim,
+        font  = Enum.Font.GothamBold,
+        size  = 13,
+        color = C.TEXT,
+        sz    = UDim2.new(1, -110, 0, 20),
+        pos   = UDim2.new(0, 14, 0, 8),
+    })
+    label(kart, {
+        text  = ev.aciklama,
+        size  = 10,
+        color = C.MUTED,
+        sz    = UDim2.new(1, -110, 0, 14),
+        pos   = UDim2.new(0, 14, 0, 28),
+    })
+    label(kart, {
+        text  = "Place ID: " .. ev.placeId,
+        size  = 9,
+        color = Color3.fromRGB(70, 70, 100),
+        sz    = UDim2.new(1, -110, 0, 12),
+        pos   = UDim2.new(0, 14, 0, 44),
+    })
+
+    -- Oyuncu sayısı badge
+    local _, badgeLbl = badge(kart, "👥 ...", Color3.fromRGB(15, 30, 15), C.GREEN, -84, 6)
+    table.insert(eventBadgeLabels, { lbl = badgeLbl, placeId = ev.placeId })
+
+    local gitBtn = button(kart, {
+        text    = "→ Git",
+        bg      = ev.renk,
+        color   = C.PURPLE_LT,
+        hoverBg = C.PURPLE_DK,
+        sz      = UDim2.new(0, 70, 0, 30),
+        pos     = UDim2.new(1, -78, 0.5, -15),
+        size    = 11,
+        radius  = 8,
+    })
+
+    local capEv = ev
+    gitBtn.MouseButton1Click:Connect(function()
+        setStatus("🚀 " .. capEv.isim .. " → gidiliyor...")
+        task.wait(0.3)
+        local ok, err = pcall(function()
+            TeleportService:Teleport(capEv.placeId, LocalPlayer)
+        end)
+        if not ok then setStatus("❌ Teleport hatası: " .. tostring(err), true) end
+    end)
+
+    kart.MouseEnter:Connect(function() kart.BackgroundColor3 = C.BG3 end)
+    kart.MouseLeave:Connect(function() kart.BackgroundColor3 = C.BG2 end)
+end
+
+-- Event oyuncu sayılarını arka planda güncelle
+task.spawn(function()
+    while true do
+        for _, entry in ipairs(eventBadgeLabels) do
+            local ok, count = pcall(function()
+                return Players:GetPlayerCountFromPlaceId(entry.placeId)
+            end)
+            if ok and count then
+                entry.lbl.Text = "👥 " .. tostring(count)
+            else
+                entry.lbl.Text = "👥 ?"
+            end
+            task.wait(1)
+        end
+        task.wait(30)  -- 30sn'de bir güncelle
+    end
+end)
+
+-- ════════════════════════════════════════════════════
+-- TAB 2: SERVER HOP (VIP)
+-- ════════════════════════════════════════════════════
+local vipPage   = tabPages[2]
+local VIP_PLACE = 537413528
+
+-- Bilgi kutusu
+local vipInfo = Instance.new("Frame")
+vipInfo.Size             = UDim2.new(1, -6, 0, 90)
+vipInfo.Position         = UDim2.new(0, 3, 0, 0)
+vipInfo.BackgroundColor3 = C.BG2
+vipInfo.BorderSizePixel  = 0
+vipInfo.Parent           = vipPage
+corner(vipInfo, 10)
+stroke(vipInfo, Color3.fromRGB(60, 50, 10))
+
+label(vipInfo, {
+    text  = "👑 Server Hop",
+    font  = Enum.Font.GothamBold,
+    size  = 14,
+    color = C.GOLD,
+    sz    = UDim2.new(1, -20, 0, 20),
+    pos   = UDim2.new(0, 12, 0, 8),
+})
+label(vipInfo, {
+    text  = "Butona tıklayınca aynı oyunda\nfark lı (genelde boş) bir sunucuya atlar.",
+    size  = 11,
+    color = C.MUTED,
+    sz    = UDim2.new(1, -20, 0, 36),
+    pos   = UDim2.new(0, 12, 0, 32),
+    wrap  = true,
+})
+
+-- Oyuncu sayısı
+local vipOyuncuLbl = label(vipInfo, {
+    text  = "👥 Yükleniyor...",
+    size  = 10,
+    color = C.GREEN,
+    sz    = UDim2.new(1, -20, 0, 14),
+    pos   = UDim2.new(0, 12, 0, 72),
+})
+
+task.spawn(function()
+    while true do
+        local ok, count = pcall(function()
+            return Players:GetPlayerCountFromPlaceId(VIP_PLACE)
+        end)
+        vipOyuncuLbl.Text = ok and ("👥 Şu an " .. tostring(count) .. " oyuncu oynuyor") or "👥 Sayı alınamadı"
+        task.wait(30)
+    end
+end)
+
+-- Durum göstergesi
+local hopDurumLbl = label(vipPage, {
+    text  = "",
+    size  = 10,
+    color = C.MUTED,
+    sz    = UDim2.new(1, -6, 0, 14),
+    pos   = UDim2.new(0, 3, 0, 98),
+})
+
+-- Server Hop butonu
+local hopBtn = button(vipPage, {
+    text    = "🔀  Server Hop — Yeni Sunucuya Atla",
+    bg      = Color3.fromRGB(40, 30, 5),
+    color   = C.GOLD,
+    hoverBg = Color3.fromRGB(70, 55, 10),
+    sz      = UDim2.new(1, -6, 0, 48),
+    pos     = UDim2.new(0, 3, 0, 118),
+    size    = 13,
+    font    = Enum.Font.GothamBold,
+    radius  = 12,
+})
+stroke(hopBtn, Color3.fromRGB(80, 60, 10))
+
+-- Otomatik hop: X sn'de bir hop et
+local autoHopAktif  = false
+local autoHopThread = nil
+local AUTO_ARALIK   = 8  -- saniye
+
+local autoBtn = button(vipPage, {
+    text    = "⏱  Otomatik Hop: KAPALI",
+    bg      = C.BG2,
+    color   = C.MUTED,
+    hoverBg = C.BG3,
+    sz      = UDim2.new(1, -6, 0, 34),
+    pos     = UDim2.new(0, 3, 0, 174),
+    size    = 11,
+    font    = Enum.Font.GothamSemibold,
+    radius  = 8,
+})
+stroke(autoBtn, Color3.fromRGB(40, 35, 70))
+
+-- Saniye ayarı (+/-)
+label(vipPage, {
+    text  = "⏱ Hop aralığı (sn):",
+    size  = 10,
+    color = C.MUTED,
+    sz    = UDim2.new(0, 120, 0, 14),
+    pos   = UDim2.new(0, 3, 0, 216),
+})
+
+local araCiktiLbl = label(vipPage, {
+    text  = tostring(AUTO_ARALIK) .. " sn",
+    size  = 11,
+    color = C.TEXT,
+    align = Enum.TextXAlignment.Center,
+    sz    = UDim2.new(0, 40, 0, 24),
+    pos   = UDim2.new(0, 128, 0, 210),
+})
+
+local azaltBtn = button(vipPage, {
+    text    = "−",
+    bg      = C.BG3,
+    color   = C.RED,
+    hoverBg = C.RED_DK,
+    sz      = UDim2.new(0, 28, 0, 24),
+    pos     = UDim2.new(0, 174, 0, 210),
+    size    = 14,
+    radius  = 6,
+})
+local artirBtn = button(vipPage, {
+    text    = "+",
+    bg      = C.BG3,
+    color   = C.GREEN,
+    hoverBg = C.GREEN_DK,
+    sz      = UDim2.new(0, 28, 0, 24),
+    pos     = UDim2.new(0, 206, 0, 210),
+    size    = 14,
+    radius  = 6,
+})
+
+azaltBtn.MouseButton1Click:Connect(function()
+    AUTO_ARALIK = math.max(3, AUTO_ARALIK - 1)
+    araCiktiLbl.Text = tostring(AUTO_ARALIK) .. " sn"
+end)
+artirBtn.MouseButton1Click:Connect(function()
+    AUTO_ARALIK = math.min(60, AUTO_ARALIK + 1)
+    araCiktiLbl.Text = tostring(AUTO_ARALIK) .. " sn"
+end)
+
+-- Tek seferlik hop fonksiyonu
+local hopYapiliyor = false
+local function serverHop()
+    if hopYapiliyor then return end
+    hopYapiliyor = true
+    hopDurumLbl.Text       = "⏳ Atlıyor..."
+    hopDurumLbl.TextColor3 = C.GOLD
+    task.wait(0.2)
+    local ok, err = pcall(function()
+        TeleportService:Teleport(VIP_PLACE, LocalPlayer)
+    end)
+    if not ok then
+        hopDurumLbl.Text       = "❌ " .. tostring(err)
+        hopDurumLbl.TextColor3 = C.RED
+        setStatus("❌ Hop hatası: " .. tostring(err), true)
+        hopYapiliyor = false
+    end
+    -- Başarılıysa zaten teleport olur, hopYapiliyor önemli değil
+end
+
+hopBtn.MouseButton1Click:Connect(serverHop)
+
+-- Otomatik hop toggle
+autoBtn.MouseButton1Click:Connect(function()
+    autoHopAktif = not autoHopAktif
+
+    if autoHopAktif then
+        autoBtn.Text             = "⏱  Otomatik Hop: AÇIK  ●"
+        autoBtn.BackgroundColor3 = C.GREEN_DK
+        autoBtn.TextColor3       = C.GREEN
+
+        autoHopThread = task.spawn(function()
+            local kalan = AUTO_ARALIK
+            while autoHopAktif do
+                hopDurumLbl.Text       = "⏳ " .. kalan .. " sn sonra atlıyor..."
+                hopDurumLbl.TextColor3 = C.GOLD
+                task.wait(1)
+                kalan = kalan - 1
+                if kalan <= 0 then
+                    hopDurumLbl.Text = "🔀 Atlıyor!"
+                    serverHop()
+                    -- Teleport başarısızsa (Studio gibi) sıfırla
+                    task.wait(1)
+                    kalan        = AUTO_ARALIK
+                    hopYapiliyor = false
+                end
+            end
+            hopDurumLbl.Text = ""
+        end)
+    else
+        autoHopAktif = false
+        autoBtn.Text             = "⏱  Otomatik Hop: KAPALI"
+        autoBtn.BackgroundColor3 = C.BG2
+        autoBtn.TextColor3       = C.MUTED
+        hopDurumLbl.Text         = ""
+        if autoHopThread then
+            task.cancel(autoHopThread)
+            autoHopThread = nil
+        end
+    end
+end)
+
+label(vipPage, {
+    text  = "ℹ️  Server Hop: aynı oyunun farklı sunucusuna atlar.\nMin 3 sn, maks 60 sn aralık seçilebilir.",
+    size  = 10,
+    color = Color3.fromRGB(65, 65, 100),
+    sz    = UDim2.new(1, -6, 0, 30),
+    pos   = UDim2.new(0, 3, 0, 242),
+    wrap  = true,
+})
+
+-- ════════════════════════════════════════════════════
+-- TAB 3: KAYITLI SUNUCULAR
+-- ════════════════════════════════════════════════════
+local savedPage = tabPages[3]
+
+local savedScroll = Instance.new("ScrollingFrame")
+savedScroll.Size                = UDim2.new(1, 0, 1, -36)
+savedScroll.BackgroundTransparency = 1
+savedScroll.BorderSizePixel     = 0
+savedScroll.ScrollBarThickness  = 3
+savedScroll.ScrollBarImageColor3 = C.PURPLE_DK
+savedScroll.CanvasSize          = UDim2.new(0, 0, 0, 0)
+savedScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+savedScroll.Parent              = savedPage
+
+local savedListLayout = Instance.new("UIListLayout")
+savedListLayout.Padding = UDim.new(0, 6)
+savedListLayout.Parent  = savedScroll
+padding(savedScroll, 3)
+
+local refreshBtn = button(savedPage, {
+    text    = "↻  Listeyi Yenile",
+    bg      = C.BG2,
+    color   = C.PURPLE,
+    hoverBg = C.BG3,
+    sz      = UDim2.new(1, -6, 0, 28),
+    pos     = UDim2.new(0, 3, 1, -30),
+    size    = 11,
+})
+
+local lunaRemote = ReplicatedStorage:FindFirstChild("LunaRemote")
+
+local function listeTemizle()
+    for _, c in ipairs(savedScroll:GetChildren()) do
+        if c:IsA("Frame") or c:IsA("TextLabel") then
+            c:Destroy()
+        end
+    end
+end
+
+local function listeYenile()
+    listeTemizle()
+
+    if not lunaRemote then
+        label(savedScroll, {
+            text  = "⚠️ Server Script aktif değil.\nServerScriptService'e LunaServerManager ekle.",
+            size  = 11,
+            color = C.RED,
+            sz    = UDim2.new(1, -6, 0, 48),
+            wrap  = true,
+        })
+        return
+    end
+
+    local ok, kayitlar = pcall(function()
+        return lunaRemote:InvokeServer("GET_SERVERS")
+    end)
+
+    if not ok or not kayitlar or #kayitlar == 0 then
+        label(savedScroll, {
+            text  = "Henüz kayıtlı sunucu yok.\n➕ Kaydet sekmesinden ekle.",
+            size  = 11,
+            color = C.MUTED,
+            sz    = UDim2.new(1, -6, 0, 40),
+            wrap  = true,
+        })
+        return
+    end
+
+    for _, kayit in ipairs(kayitlar) do
+        -- Kart: not varsa daha yüksek
+        local kartH = kayit.not_ and kayit.not_ ~= "" and 88 or 72
+        local kart = Instance.new("Frame")
+        kart.Size             = UDim2.new(1, -6, 0, kartH)
+        kart.BackgroundColor3 = C.BG2
+        kart.BorderSizePixel  = 0
+        kart.Parent           = savedScroll
+        corner(kart, 10)
+        stroke(kart, Color3.fromRGB(30, 25, 60))
+
+        -- Yeşil nokta
+        local dot = Instance.new("Frame")
+        dot.Size             = UDim2.new(0, 7, 0, 7)
+        dot.Position         = UDim2.new(0, 10, 0, 12)
+        dot.BackgroundColor3 = C.GREEN
+        dot.BorderSizePixel  = 0
+        dot.Parent           = kart
+        corner(dot, 10)
+
+        label(kart, {
+            text  = kayit.isim or "Sunucu",
+            font  = Enum.Font.GothamBold,
+            size  = 12,
+            color = C.TEXT,
+            sz    = UDim2.new(1, -120, 0, 18),
+            pos   = UDim2.new(0, 22, 0, 6),
+        })
+        label(kart, {
+            text  = "Place: " .. tostring(kayit.placeId) .. "  |  " .. tostring(kayit.oyuncu or "?") .. " kişi kaydında",
+            size  = 9,
+            color = C.MUTED,
+            sz    = UDim2.new(1, -120, 0, 14),
+            pos   = UDim2.new(0, 22, 0, 25),
+        })
+
+        local jobStr = tostring(kayit.jobId or "")
+        label(kart, {
+            text  = "ID: " .. string.sub(jobStr, 1, 20) .. (string.len(jobStr) > 20 and "…" or ""),
+            size  = 9,
+            color = Color3.fromRGB(70, 70, 100),
+            sz    = UDim2.new(1, -120, 0, 12),
+            pos   = UDim2.new(0, 22, 0, 40),
+        })
+
+        -- Not varsa göster
+        if kayit.not_ and kayit.not_ ~= "" then
+            local notFrame = Instance.new("Frame")
+            notFrame.Size             = UDim2.new(1, -24, 0, 18)
+            notFrame.Position         = UDim2.new(0, 12, 0, 56)
+            notFrame.BackgroundColor3 = C.BG3
+            notFrame.BorderSizePixel  = 0
+            notFrame.Parent           = kart
+            corner(notFrame, 5)
+            padding(notFrame, 4, 1)
+            label(notFrame, {
+                text  = "📝 " .. kayit.not_,
+                size  = 9,
+                color = C.ORANGE,
+                sz    = UDim2.new(1, 0, 1, 0),
+                wrap  = false,
+            })
+        end
+
+        -- Oyuncu sayısı badge (kayıt sırasındaki)
+        local oyuncuSayi = tostring(kayit.oyuncu or "?")
+        local _, oyuncuLbl = badge(kart, "👥 " .. oyuncuSayi, Color3.fromRGB(10, 25, 10), C.GREEN, -120, 6)
+        oyuncuLbl.Text = "👥 " .. oyuncuSayi
+
+        local gitBtn = button(kart, {
+            text    = "→ Git",
+            bg      = C.BG3,
+            color   = C.PURPLE,
+            hoverBg = C.PURPLE_DK,
+            sz      = UDim2.new(0, 50, 0, 26),
+            pos     = UDim2.new(1, -108, 1, -34),
+            size    = 10,
+        })
+        local silBtn = button(kart, {
+            text    = "🗑",
+            bg      = C.RED_DK,
+            color   = C.RED,
+            hoverBg = Color3.fromRGB(70, 20, 20),
+            sz      = UDim2.new(0, 32, 0, 26),
+            pos     = UDim2.new(1, -50, 1, -34),
+            size    = 11,
+        })
+
+        local capKayit = kayit
+        gitBtn.MouseButton1Click:Connect(function()
+            setStatus("🚀 " .. (capKayit.isim or "Sunucu") .. " → bağlanıyor...")
+            task.wait(0.3)
+            local ok2, err = pcall(function()
+                local opts = Instance.new("TeleportOptions")
+                opts.ServerInstanceId = capKayit.jobId
+                TeleportService:TeleportAsync(capKayit.placeId, {LocalPlayer}, opts)
+            end)
+            if not ok2 then setStatus("❌ Hata: " .. tostring(err), true) end
+        end)
+
+        silBtn.MouseButton1Click:Connect(function()
+            if lunaRemote then
+                pcall(function() lunaRemote:InvokeServer("DELETE_SERVER", capKayit.jobId) end)
+            end
+            setStatus("🗑️ Silindi: " .. (capKayit.isim or "Sunucu"))
+            listeYenile()
+        end)
+    end
+end
+
+refreshBtn.MouseButton1Click:Connect(listeYenile)
+
+-- ════════════════════════════════════════════════════
+-- TAB 4: KAYDET — GELİŞTİRİLMİŞ
+-- ════════════════════════════════════════════════════
+local kaydPage = tabPages[4]
+
+-- ── Bilgi kutusu ──
+local infoBox = Instance.new("Frame")
+infoBox.Size             = UDim2.new(1, -6, 0, 120)
+infoBox.Position         = UDim2.new(0, 3, 0, 0)
+infoBox.BackgroundColor3 = C.BG2
+infoBox.BorderSizePixel  = 0
+infoBox.Parent           = kaydPage
+corner(infoBox, 10)
+stroke(infoBox, Color3.fromRGB(40, 35, 80))
+
+label(infoBox, {
+    text  = "📡 Mevcut Sunucu Bilgileri",
+    font  = Enum.Font.GothamBold,
+    size  = 11,
+    color = C.PURPLE,
+    sz    = UDim2.new(1, -20, 0, 16),
+    pos   = UDim2.new(0, 10, 0, 4),
+})
+
+local function bilgiSatiri(parent, yPos, lTxt, vTxt)
+    label(parent, {
+        text  = lTxt,
+        size  = 10,
+        color = C.MUTED,
+        sz    = UDim2.new(0, 80, 0, 15),
+        pos   = UDim2.new(0, 10, 0, yPos),
+    })
+    return label(parent, {
+        text  = vTxt,
+        size  = 10,
+        color = C.TEXT,
+        sz    = UDim2.new(1, -100, 0, 15),
+        pos   = UDim2.new(0, 95, 0, yPos),
+    })
+end
+
+bilgiSatiri(infoBox, 20, "Sunucu ID:",
+    MEVCUT_JOB_ID ~= "" and string.sub(MEVCUT_JOB_ID, 1, 24) .. "…" or "Studio'da boş ⚠️")
+bilgiSatiri(infoBox, 36, "Place ID:", tostring(MEVCUT_PLACE_ID))
+local kaydOyuncuVal = bilgiSatiri(infoBox, 52, "Oyuncu:", tostring(#Players:GetPlayers()))
+bilgiSatiri(infoBox, 68, "Durum:",
+    MEVCUT_JOB_ID ~= "" and "🟢 Canlı Sunucu" or "🟡 Studio Testi")
+bilgiSatiri(infoBox, 84, "Tarih:", os.date("%d.%m.%Y  %H:%M"))
+
+-- Oyuncu sayısını canlı güncelle
+task.spawn(function()
+    while task.wait(8) do
+        kaydOyuncuVal.Text = tostring(#Players:GetPlayers()) .. " kişi"
+    end
+end)
+
+-- ── İsim alanı ──
+local function inputLabel(parent, yPos, txt)
+    label(parent, {
+        text  = txt,
+        size  = 10,
+        color = C.MUTED,
+        sz    = UDim2.new(1, -6, 0, 14),
+        pos   = UDim2.new(0, 3, 0, yPos),
+    })
+end
+
+local function inputBox(parent, yPos, placeholder)
+    local box = Instance.new("TextBox")
+    box.Size              = UDim2.new(1, -6, 0, 30)
+    box.Position          = UDim2.new(0, 3, 0, yPos)
+    box.BackgroundColor3  = C.BG2
+    box.BorderSizePixel   = 0
+    box.PlaceholderText   = placeholder
+    box.PlaceholderColor3 = C.MUTED
+    box.Text              = ""
+    box.TextColor3        = C.TEXT
+    box.Font              = Enum.Font.Gotham
+    box.TextSize          = 11
+    box.ClearTextOnFocus  = false
+    box.Parent            = parent
+    corner(box, 8)
+    padding(box, 8, 5)
+    stroke(box, Color3.fromRGB(40, 35, 75))
+    return box
+end
+
+inputLabel(kaydPage, 128, "📛  Sunucu adı:")
+local nameBox = inputBox(kaydPage, 142, "örn: Ana Sunucu, Farm Sunucusu...")
+
+inputLabel(kaydPage, 178, "📝  Not (opsiyonel):")
+local notBox = inputBox(kaydPage, 192, "örn: Ormanda, kalabalık değil, hız bonusu var...")
+
+-- ── Etiket seçici ──
+inputLabel(kaydPage, 228, "🏷️  Etiket:")
+
+local TAG_LIST = {
+    { isim = "🌾 Farm",    renk = Color3.fromRGB(30, 60, 15) },
+    { isim = "⚔️ PVP",     renk = Color3.fromRGB(60, 15, 15) },
+    { isim = "😴 AFK",     renk = Color3.fromRGB(20, 20, 50) },
+    { isim = "👥 Kalabalık", renk = Color3.fromRGB(15, 40, 60) },
+    { isim = "✨ Favori",   renk = Color3.fromRGB(60, 50, 10) },
+    { isim = "🔇 Boş",     renk = Color3.fromRGB(30, 30, 30) },
+}
+
+local tagFrame = Instance.new("Frame")
+tagFrame.Size             = UDim2.new(1, -6, 0, 28)
+tagFrame.Position         = UDim2.new(0, 3, 0, 242)
+tagFrame.BackgroundTransparency = 1
+tagFrame.Parent           = kaydPage
+
+local tagLayout = Instance.new("UIListLayout")
+tagLayout.FillDirection = Enum.FillDirection.Horizontal
+tagLayout.Padding       = UDim.new(0, 4)
+tagLayout.Parent        = tagFrame
+
+local seciliTag = nil
+local tagBtnlar = {}
+
+for _, tag in ipairs(TAG_LIST) do
+    local tb = Instance.new("TextButton")
+    tb.Size             = UDim2.new(0, 50, 1, 0)
+    tb.BackgroundColor3 = C.BG3
+    tb.BorderSizePixel  = 0
+    tb.Text             = tag.isim
+    tb.TextColor3       = C.MUTED
+    tb.Font             = Enum.Font.GothamSemibold
+    tb.TextSize         = 8
+    tb.AutoButtonColor  = false
+    tb.Parent           = tagFrame
+    corner(tb, 6)
+
+    local capTag = tag
+    tb.MouseButton1Click:Connect(function()
+        if seciliTag == capTag.isim then
+            -- tekrar tıklayınca seçimi kaldır
+            seciliTag = nil
+            for _, b in ipairs(tagBtnlar) do
+                b.btn.BackgroundColor3 = C.BG3
+                b.btn.TextColor3       = C.MUTED
+            end
+        else
+            seciliTag = capTag.isim
+            for _, b in ipairs(tagBtnlar) do
+                if b.tag == capTag.isim then
+                    b.btn.BackgroundColor3 = capTag.renk
+                    b.btn.TextColor3       = C.WHITE
+                else
+                    b.btn.BackgroundColor3 = C.BG3
+                    b.btn.TextColor3       = C.MUTED
+                end
+            end
+        end
+    end)
+
+    table.insert(tagBtnlar, { btn = tb, tag = tag.isim })
+end
+
+-- ── Kaydet butonu ──
+local kaydetBtn = button(kaydPage, {
+    text    = "💾  Bu Sunucuyu Kaydet",
+    bg      = C.GREEN_DK,
+    color   = C.GREEN,
+    hoverBg = Color3.fromRGB(15, 90, 35),
+    sz      = UDim2.new(1, -6, 0, 40),
+    pos     = UDim2.new(0, 3, 0, 278),
+    size    = 13,
+    font    = Enum.Font.GothamBold,
+    radius  = 10,
+})
+stroke(kaydetBtn, Color3.fromRGB(20, 70, 30))
+
+kaydetBtn.MouseButton1Click:Connect(function()
+    if MEVCUT_JOB_ID == "" then
+        setStatus("⚠️ Studio'da JobId boş — sadece yayında çalışır", true)
+        return
+    end
+    if not lunaRemote then
+        setStatus("⚠️ Server Script bağlı değil!", true)
+        return
+    end
+
+    local isim = (nameBox.Text ~= "" and nameBox.Text)
+        or ("Sunucu · " .. os.date("%H:%M"))
+
+    local not_ = notBox.Text ~= "" and notBox.Text or nil
+
+    local ok, sonuc = pcall(function()
+        return lunaRemote:InvokeServer("SAVE_SERVER", {
+            jobId   = MEVCUT_JOB_ID,
+            placeId = MEVCUT_PLACE_ID,
+            isim    = isim,
+            not_    = not_,
+            etiket  = seciliTag,
+            oyuncu  = #Players:GetPlayers(),
+        })
+    end)
+
+    if not ok then
+        setStatus("❌ Hata: " .. tostring(sonuc), true)
+    elseif sonuc == "OK" then
+        setStatus("✅ Kaydedildi: " .. isim)
+        nameBox.Text = ""
+        notBox.Text  = ""
+        -- Etiketi sıfırla
+        seciliTag = nil
+        for _, b in ipairs(tagBtnlar) do
+            b.btn.BackgroundColor3 = C.BG3
+            b.btn.TextColor3       = C.MUTED
+        end
+    elseif sonuc == "EXISTS" then
+        setStatus("⚠️ Bu sunucu zaten kayıtlı!", true)
+    else
+        setStatus("❌ Yanıt: " .. tostring(sonuc), true)
+    end
+end)
+
+label(kaydPage, {
+    text  = "ℹ️  Kayıtlı sunuculara 'Kayıtlı' sekmesinden ulaşabilirsin. Maks. 20 sunucu saklanır.",
+    size  = 10,
+    color = C.MUTED,
+    sz    = UDim2.new(1, -6, 0, 36),
+    pos   = UDim2.new(0, 3, 0, 326),
+    wrap  = true,
+})
+
+-- ════════════════════════════════════════════════════
+-- Remote bağlantısı + ilk yükleme
+-- ════════════════════════════════════════════════════
+task.spawn(function()
+    if not lunaRemote then
+        lunaRemote = ReplicatedStorage:WaitForChild("LunaRemote", 10)
+    end
+    if lunaRemote then
+        listeYenile()
+    end
+end)
+
+switchTab(1)
+print("🌙 Luna Bot v4.1 yüklendi!")
