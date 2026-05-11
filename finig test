@@ -1,0 +1,1960 @@
+-- ============================================================
+-- FLING V13 - GELİŞMİŞ FLING SİSTEMİ v2.2 (TAMAMEN DÜZELTİLMİŞ)
+-- Anti-Fling, Anti-Ragdoll, Hızlı Dönüş, Bypass Destekli
+-- Netarz (Neon) Efektler, Gelişmiş Anti-Cheat Bypass
+-- ALL MODU - Tüm Oyunculara Otomatik Fling
+-- 
+-- DÜZELTİLENLER v2.2:
+-- 1. BypassToggle çift handler hatası TAMAMEN giderildi
+-- 2. getBypass/getAllModu tutarsızlığı düzeltildi
+-- 3. eskiKonum nil kontrolü güçlendirildi
+-- 4. AllProgress tween animasyonu eklendi
+-- 5. Oyuncu Character yeniden oluşturulduğunda vurgu otomatik temizleniyor
+-- 6. Network ownership bypass optimize edildi (event-based)
+-- 7. Matrix efekti ASCII karakterlere çevrildi (font uyumluluğu)
+-- 8. Fling sırasında hedef çıkarsa güvenli çıkış eklendi
+-- 9. antiRagdoll Motor6D ve Weld kontrolü eklendi
+-- 10. UIListLayout temizlik kodu basitleştirildi
+-- 11. Tüm pcall'lar güçlendirildi, hata mesajları detaylandırıldı
+-- 12. Memory leak önlemleri eklendi (connection temizliği)
+-- ============================================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local SoundService = game:GetService("SoundService")
+local StarterGui = game:GetService("StarterGui")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+local HttpService = game:GetService("HttpService")
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- ============================================================
+-- KONFIGURASYON
+-- ============================================================
+local CONFIG = {
+    GUI_Genislik = 420,
+    GUI_Yukseklik = 600,
+    VarsayilanGuc = 150000,
+    MinGuc = 10000,
+    MaxGuc = 999999,
+    GucAdim = 10000,
+    FlingSuresi = 1.5,
+    TakipMesafesi = 2.5,
+    AnimasyonHizi = 0.3,
+    BildirimSuresi = 4,
+    OtomatikGuncellemeAraligi = 2,
+    MaxFavori = 10,
+    MaxGecmis = 20,
+    AllModuBekleme = 2.5,
+    VurguSuresi = 4,
+    NeonHiz = 0.05,
+    GlowHiz = 0.03
+}
+
+-- ============================================================
+-- VERI YONETIMI
+-- ============================================================
+local Veriler = {
+    Favoriler = {},
+    Gecmis = {},
+    Istatistikler = {
+        ToplamFling = 0,
+        BasariliFling = 0,
+        SonFling = "Hic"
+    }
+}
+
+local eskiKonum = nil
+
+local function veriKaydet()
+    pcall(function()
+        _G.FlingV13_Veriler = Veriler
+    end)
+end
+
+local function veriYukle()
+    if _G.FlingV13_Veriler then
+        Veriler = _G.FlingV13_Veriler
+    end
+end
+
+veriYukle()
+
+-- ============================================================
+-- SES SISTEMI
+-- ============================================================
+local SesKutuphanesi = {
+    Acilis = 2865227271,
+    Tik = 12221967,
+    Basari = 9113083740,
+    Hata = 9113085301,
+    Fling = 9113086567,
+    GeriDonus = 9113087809,
+    Uyari = 9113088901,
+    AllStart = 9113083740,
+    AllDone = 9113087809
+}
+
+local AktifSesler = {}
+
+local function sesCal(soundId, hacim)
+    hacim = hacim or 0.5
+    local ses = Instance.new("Sound")
+    ses.SoundId = "rbxassetid://" .. tostring(soundId)
+    ses.Volume = hacim
+    ses.Parent = SoundService
+
+    table.insert(AktifSesler, ses)
+
+    ses:Play()
+    ses.Ended:Connect(function()
+        for i, s in ipairs(AktifSesler) do
+            if s == ses then
+                table.remove(AktifSesler, i)
+                break
+            end
+        end
+        pcall(function() ses:Destroy() end)
+    end)
+
+    return ses
+end
+
+sesCal(SesKutuphanesi.Acilis, 0.3)
+
+-- ============================================================
+-- GELİŞMİŞ BYPASS SİSTEMİ v2.1
+-- ============================================================
+local BypassManager = {
+    Hooks = {},
+    FlagFunction = nil,
+    TerminateFunction = nil,
+    IsVerbose = true,
+    IsActive = false
+}
+
+local StatusTracker = {
+    DetectionDisabled = false,
+    KillBlocked = false,
+    DebugInfoIntercepted = false,
+    RemoteBlocked = false,
+    HeartbeatHooked = false
+}
+
+local function safeCall(func, ...)
+    local success, result = pcall(func, ...)
+    if not success and BypassManager.IsVerbose then
+        warn("[Bypass Error]", tostring(result))
+    end
+    return success, result
+end
+
+local function wrapFunction(target, handler)
+    return safeCall(function()
+        return hookfunction(target, newcclosure(handler))
+    end)
+end
+
+local function bypassAdonis()
+    safeCall(function()
+        setthreadidentity(2)
+        local collected = getgc(true)
+
+        for _, item in ipairs(collected) do
+            if typeof(item) == 'table' then
+                local detected = rawget(item, 'Detected')
+                local kill = rawget(item, 'Kill')
+
+                if typeof(detected) == 'function' and not BypassManager.FlagFunction then
+                    BypassManager.FlagFunction = detected
+                    wrapFunction(detected, function(trigger, details)
+                        if trigger ~= '_' and BypassManager.IsVerbose then
+                            warn('[Adonis] Detection blocked:', tostring(trigger), tostring(details))
+                        end
+                        return true
+                    end)
+                    StatusTracker.DetectionDisabled = true
+                end
+
+                if typeof(kill) == 'function' and rawget(item, 'Variables') 
+                    and rawget(item, 'Process') and not BypassManager.TerminateFunction then
+                    BypassManager.TerminateFunction = kill
+                    wrapFunction(kill, function(cause)
+                        if BypassManager.IsVerbose then
+                            warn('[Adonis] Kill blocked:', tostring(cause))
+                        end
+                        return nil
+                    end)
+                    StatusTracker.KillBlocked = true
+                end
+            end
+        end
+        setthreadidentity(7)
+    end)
+end
+
+local function bypassRegistryKick()
+    safeCall(function()
+        local registry = getreg()
+        for i, v in pairs(registry) do
+            if type(v) == "function" then
+                local info = getinfo(v)
+                if info and (info.name == "kick" or info.name == "Kick") then
+                    hookfunction(info.func, function(...) 
+                        warn('[Registry] Kick blocked')
+                        return nil 
+                    end)
+                end
+            end
+        end
+    end)
+end
+
+local function bypassDebugInfo()
+    safeCall(function()
+        local original = getrenv().debug.info
+        local hooked = hookfunction(original, newcclosure(function(...)
+            local args = {...}
+            if BypassManager.FlagFunction and args[1] == BypassManager.FlagFunction then
+                warn('[Debug] Info hook blocked detection')
+                return coroutine.yield(coroutine.running())
+            end
+            return hooked(...)
+        end))
+        StatusTracker.DebugInfoIntercepted = true
+    end)
+end
+
+local function bypassRemotes()
+    safeCall(function()
+        local mt = getrawmetatable(game)
+        local oldNamecall = mt.__namecall
+
+        setreadonly(mt, false)
+        mt.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            if method == "Kick" or method == "kick" then
+                warn('[Remote] Kick blocked via namecall')
+                return nil
+            end
+            if method == "FireServer" or method == "InvokeServer" then
+                if BypassManager.IsVerbose then
+                    warn('[Remote]', tostring(method), 'called on', tostring(self.Name))
+                end
+            end
+            return oldNamecall(self, ...)
+        end)
+        setreadonly(mt, true)
+        StatusTracker.RemoteBlocked = true
+    end)
+end
+
+-- DÜZELTME #6: Network ownership bypass optimize edildi (event-based)
+local function bypassNetworkOwnership()
+    safeCall(function()
+        local function setOwnership(char)
+            if not char then return end
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    pcall(function()
+                        part:SetNetworkOwner(nil)
+                    end)
+                end
+            end
+        end
+
+        if LocalPlayer.Character then
+            task.spawn(function()
+                task.wait(1)
+                setOwnership(LocalPlayer.Character)
+            end)
+        end
+
+        LocalPlayer.CharacterAdded:Connect(function(char)
+            task.wait(1)
+            setOwnership(char)
+        end)
+    end)
+end
+
+local function bypassAntiIdle()
+    safeCall(function()
+        local VirtualUser = game:GetService("VirtualUser")
+        LocalPlayer.Idled:Connect(function()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+            warn('[Anti-AFK] Idle prevented')
+        end)
+    end)
+end
+
+local function cleanMemory()
+    safeCall(function()
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("BasePart") and (obj.Name:match("AntiCheat") or obj.Name:match("AC_")) then
+                pcall(function()
+                    obj:Destroy()
+                    warn('[Memory] Anti-cheat object removed:', obj.Name)
+                end)
+            end
+        end
+    end)
+end
+
+local function activateAllBypasses()
+    if BypassManager.IsActive then return end
+    BypassManager.IsActive = true
+
+    bypassAdonis()
+    bypassRegistryKick()
+    bypassDebugInfo()
+    bypassRemotes()
+    bypassNetworkOwnership()
+    bypassAntiIdle()
+    cleanMemory()
+
+    print(string.format(
+        '[Bypass Status] Detection: %s | Kill: %s | Debug: %s | Remote: %s',
+        tostring(StatusTracker.DetectionDisabled),
+        tostring(StatusTracker.KillBlocked),
+        tostring(StatusTracker.DebugInfoIntercepted),
+        tostring(StatusTracker.RemoteBlocked)
+    ))
+end
+
+-- ============================================================
+-- NETARZ (NEON) EFEKT SİSTEMİ v2.1
+-- ============================================================
+local NeonEffects = {}
+
+local function createNeonBar(parent)
+    local bar = Instance.new("Frame")
+    bar.Name = "NeonBar"
+    bar.Size = UDim2.new(1, 0, 0, 3)
+    bar.Position = UDim2.new(0, 0, 0, 53)
+    bar.BorderSizePixel = 0
+    bar.ZIndex = 10
+    bar.Parent = parent
+
+    local gradient = Instance.new("UIGradient")
+    gradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 100)),
+        ColorSequenceKeypoint.new(0.2, Color3.fromRGB(255, 100, 0)),
+        ColorSequenceKeypoint.new(0.4, Color3.fromRGB(255, 255, 0)),
+        ColorSequenceKeypoint.new(0.6, Color3.fromRGB(0, 255, 100)),
+        ColorSequenceKeypoint.new(0.8, Color3.fromRGB(0, 100, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 100))
+    })
+    gradient.Parent = bar
+
+    table.insert(NeonEffects, gradient)
+    return gradient
+end
+
+local function createPulseGlow(parent)
+    local glow = Instance.new("ImageLabel")
+    glow.Name = "PulseGlow"
+    glow.AnchorPoint = Vector2.new(0.5, 0.5)
+    glow.BackgroundTransparency = 1
+    glow.Position = UDim2.new(0.5, 0, 0.5, 0)
+    glow.Size = UDim2.new(1, 80, 1, 80)
+    glow.ZIndex = -3
+    glow.Image = "rbxassetid://5028857084"
+    glow.ImageColor3 = Color3.fromRGB(255, 0, 150)
+    glow.ImageTransparency = 0.9
+    glow.ScaleType = Enum.ScaleType.Slice
+    glow.SliceCenter = Rect.new(24, 24, 276, 276)
+    glow.Parent = parent
+
+    table.insert(NeonEffects, glow)
+    return glow
+end
+
+local function createParticles(parent)
+    local particleFrame = Instance.new("Frame")
+    particleFrame.Name = "Particles"
+    particleFrame.Size = UDim2.new(1, 0, 1, 0)
+    particleFrame.BackgroundTransparency = 1
+    particleFrame.Parent = parent
+
+    for i = 1, 20 do
+        local particle = Instance.new("Frame")
+        particle.Size = UDim2.new(0, math.random(2, 4), 0, math.random(2, 4))
+        particle.Position = UDim2.new(math.random(), 0, math.random(), 0)
+        particle.BackgroundColor3 = Color3.fromRGB(
+            math.random(100, 255), 
+            math.random(0, 100), 
+            math.random(100, 255)
+        )
+        particle.BorderSizePixel = 0
+        particle.BackgroundTransparency = 0.7
+        particle.Parent = particleFrame
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(1, 0)
+        corner.Parent = particle
+
+        task.spawn(function()
+            while particle and particle.Parent do
+                local tween = TweenService:Create(particle, TweenInfo.new(
+                    math.random(2, 4), 
+                    Enum.EasingStyle.Sine, 
+                    Enum.EasingDirection.InOut, 
+                    -1, 
+                    true
+                ), {
+                    Position = UDim2.new(math.random(), 0, math.random(), 0),
+                    BackgroundTransparency = math.random(0.3, 0.9)
+                })
+                tween:Play()
+                task.wait(math.random(2, 4))
+            end
+        end)
+    end
+end
+
+local function addNeonButtonEffect(button)
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(255, 0, 150)
+    stroke.Thickness = 2
+    stroke.Transparency = 0.8
+    stroke.Parent = button
+
+    task.spawn(function()
+        while button and button.Parent do
+            for i = 0.8, 0.2, -0.05 do
+                if not button or not button.Parent then break end
+                stroke.Transparency = i
+                task.wait(0.05)
+            end
+            for i = 0.2, 0.8, 0.05 do
+                if not button or not button.Parent then break end
+                stroke.Transparency = i
+                task.wait(0.05)
+            end
+        end
+    end)
+end
+
+local function createScanline(parent)
+    local scanline = Instance.new("Frame")
+    scanline.Name = "Scanline"
+    scanline.Size = UDim2.new(1, 0, 0, 2)
+    scanline.Position = UDim2.new(0, 0, 0, 0)
+    scanline.BackgroundColor3 = Color3.fromRGB(0, 255, 255)
+    scanline.BackgroundTransparency = 0.5
+    scanline.BorderSizePixel = 0
+    scanline.ZIndex = 100
+    scanline.Parent = parent
+
+    task.spawn(function()
+        while scanline and scanline.Parent do
+            scanline.Position = UDim2.new(0, 0, 0, 0)
+            local tween = TweenService:Create(scanline, TweenInfo.new(2), {
+                Position = UDim2.new(0, 0, 1, 0)
+            })
+            tween:Play()
+            task.wait(2.1)
+        end
+    end)
+end
+
+-- DÜZELTME #7: Matrix efekti ASCII karakterlere çevrildi (font uyumluluğu)
+local function createMatrixEffect(parent)
+    local matrixFrame = Instance.new("Frame")
+    matrixFrame.Name = "Matrix"
+    matrixFrame.Size = UDim2.new(1, 0, 1, 0)
+    matrixFrame.BackgroundTransparency = 1
+    matrixFrame.ZIndex = -1
+    matrixFrame.Parent = parent
+
+    local chars = "01ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@#$%&*"
+
+    for i = 1, 15 do
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(0, 20, 0, 20)
+        label.Position = UDim2.new(i/15, 0, math.random(), 0)
+        label.Text = chars:sub(math.random(1, #chars), math.random(1, #chars))
+        label.TextColor3 = Color3.fromRGB(0, 255, 100)
+        label.TextTransparency = 0.9
+        label.BackgroundTransparency = 1
+        label.Font = Enum.Font.Code
+        label.TextSize = 14
+        label.Parent = matrixFrame
+
+        task.spawn(function()
+            while label and label.Parent do
+                label.Text = chars:sub(math.random(1, #chars), math.random(1, #chars))
+                label.TextTransparency = math.random(0.7, 0.95)
+                task.wait(math.random(0.1, 0.5))
+            end
+        end)
+    end
+end
+
+-- ============================================================
+-- ANA GUI
+-- ============================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FlingV13"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, CONFIG.GUI_Genislik, 0, CONFIG.GUI_Yukseklik)
+MainFrame.Position = UDim2.new(0.5, -CONFIG.GUI_Genislik/2, 0.5, -CONFIG.GUI_Yukseklik/2)
+MainFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 15)
+MainFrame.BorderSizePixel = 0
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 20)
+MainCorner.Parent = MainFrame
+
+local Glow = Instance.new("ImageLabel")
+Glow.Name = "Glow"
+Glow.AnchorPoint = Vector2.new(0.5, 0.5)
+Glow.BackgroundTransparency = 1
+Glow.Position = UDim2.new(0.5, 0, 0.5, 0)
+Glow.Size = UDim2.new(1, 60, 1, 60)
+Glow.ZIndex = -2
+Glow.Image = "rbxassetid://5028857084"
+Glow.ImageColor3 = Color3.fromRGB(255, 0, 150)
+Glow.ImageTransparency = 0.8
+Glow.ScaleType = Enum.ScaleType.Slice
+Glow.SliceCenter = Rect.new(24, 24, 276, 276)
+Glow.Parent = MainFrame
+
+local Shadow = Instance.new("ImageLabel")
+Shadow.Name = "Shadow"
+Shadow.AnchorPoint = Vector2.new(0.5, 0.5)
+Shadow.BackgroundTransparency = 1
+Shadow.Position = UDim2.new(0.5, 0, 0.5, 0)
+Shadow.Size = UDim2.new(1, 50, 1, 50)
+Shadow.ZIndex = -1
+Shadow.Image = "rbxassetid://5554236805"
+Shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+Shadow.ImageTransparency = 0.5
+Shadow.ScaleType = Enum.ScaleType.Slice
+Shadow.SliceCenter = Rect.new(23, 23, 277, 277)
+Shadow.Parent = MainFrame
+
+createNeonBar(MainFrame)
+createPulseGlow(MainFrame)
+createParticles(MainFrame)
+createScanline(MainFrame)
+createMatrixEffect(MainFrame)
+
+-- TitleBar
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, 56)
+TitleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+
+local TitleBarCorner = Instance.new("UICorner")
+TitleBarCorner.CornerRadius = UDim.new(0, 20)
+TitleBarCorner.Parent = TitleBar
+
+local TitleBarFix = Instance.new("Frame")
+TitleBarFix.Size = UDim2.new(1, 0, 0, 20)
+TitleBarFix.Position = UDim2.new(0, 0, 0.5, 0)
+TitleBarFix.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+TitleBarFix.BorderSizePixel = 0
+TitleBarFix.Parent = TitleBar
+
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Size = UDim2.new(0.7, 0, 1, 0)
+Title.Position = UDim2.new(0, 20, 0, 0)
+Title.Text = "🔥 FLING V13"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.BackgroundTransparency = 1
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 22
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleBar
+
+local titleStroke = Instance.new("UIStroke")
+titleStroke.Color = Color3.fromRGB(255, 0, 150)
+titleStroke.Thickness = 1
+titleStroke.Parent = Title
+
+local VersionLabel = Instance.new("TextLabel")
+VersionLabel.Size = UDim2.new(0, 80, 0, 20)
+VersionLabel.Position = UDim2.new(0, 20, 0.6, 0)
+VersionLabel.Text = "NETARZ v2.2"
+VersionLabel.TextColor3 = Color3.fromRGB(255, 0, 150)
+VersionLabel.BackgroundTransparency = 1
+VersionLabel.Font = Enum.Font.GothamBold
+VersionLabel.TextSize = 10
+VersionLabel.TextXAlignment = Enum.TextXAlignment.Left
+VersionLabel.Parent = TitleBar
+
+local versionStroke = Instance.new("UIStroke")
+versionStroke.Color = Color3.fromRGB(255, 0, 150)
+versionStroke.Thickness = 0.5
+versionStroke.Parent = VersionLabel
+
+local StatsLabel = Instance.new("TextLabel")
+StatsLabel.Size = UDim2.new(0.4, 0, 0, 20)
+StatsLabel.Position = UDim2.new(0.55, 0, 0.65, 0)
+StatsLabel.Text = "Toplam: 0 | Başarılı: 0"
+StatsLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+StatsLabel.BackgroundTransparency = 1
+StatsLabel.Font = Enum.Font.Gotham
+StatsLabel.TextSize = 10
+StatsLabel.TextXAlignment = Enum.TextXAlignment.Right
+StatsLabel.Parent = TitleBar
+
+-- ============================================================
+-- KONTROL BUTONLARI
+-- ============================================================
+local ButtonsFrame = Instance.new("Frame")
+ButtonsFrame.Size = UDim2.new(0, 120, 0, 36)
+ButtonsFrame.Position = UDim2.new(1, -130, 0, 10)
+ButtonsFrame.BackgroundTransparency = 1
+ButtonsFrame.Parent = TitleBar
+
+local KapatButton = Instance.new("TextButton")
+KapatButton.Size = UDim2.new(0, 32, 0, 32)
+KapatButton.Position = UDim2.new(1, -36, 0, 2)
+KapatButton.Text = "✕"
+KapatButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+KapatButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+KapatButton.Font = Enum.Font.GothamBold
+KapatButton.TextSize = 14
+KapatButton.Parent = ButtonsFrame
+addNeonButtonEffect(KapatButton)
+
+local KapatCorner = Instance.new("UICorner")
+KapatCorner.CornerRadius = UDim.new(0, 10)
+KapatCorner.Parent = KapatButton
+
+local KucultButton = Instance.new("TextButton")
+KucultButton.Size = UDim2.new(0, 32, 0, 32)
+KucultButton.Position = UDim2.new(1, -74, 0, 2)
+KucultButton.Text = "−"
+KucultButton.BackgroundColor3 = Color3.fromRGB(255, 180, 0)
+KucultButton.TextColor3 = Color3.fromRGB(0, 0, 0)
+KucultButton.Font = Enum.Font.GothamBold
+KucultButton.TextSize = 18
+KucultButton.Parent = ButtonsFrame
+addNeonButtonEffect(KucultButton)
+
+local KucultCorner = Instance.new("UICorner")
+KucultCorner.CornerRadius = UDim.new(0, 10)
+KucultCorner.Parent = KucultButton
+
+local AyarlarButton = Instance.new("TextButton")
+AyarlarButton.Size = UDim2.new(0, 32, 0, 32)
+AyarlarButton.Position = UDim2.new(1, -112, 0, 2)
+AyarlarButton.Text = "⚙"
+AyarlarButton.BackgroundColor3 = Color3.fromRGB(80, 80, 90)
+AyarlarButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+AyarlarButton.Font = Enum.Font.GothamBold
+AyarlarButton.TextSize = 16
+AyarlarButton.Parent = ButtonsFrame
+addNeonButtonEffect(AyarlarButton)
+
+local AyarlarCorner = Instance.new("UICorner")
+AyarlarCorner.CornerRadius = UDim.new(0, 10)
+AyarlarCorner.Parent = AyarlarButton
+
+-- ============================================================
+-- SEKMELER (Tabs)
+-- ============================================================
+local TabsFrame = Instance.new("Frame")
+TabsFrame.Size = UDim2.new(1, -20, 0, 36)
+TabsFrame.Position = UDim2.new(0, 10, 0, 62)
+TabsFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+TabsFrame.BorderSizePixel = 0
+TabsFrame.Parent = MainFrame
+
+local TabsCorner = Instance.new("UICorner")
+TabsCorner.CornerRadius = UDim.new(0, 10)
+TabsCorner.Parent = TabsFrame
+
+local TabLayout = Instance.new("UIListLayout")
+TabLayout.FillDirection = Enum.FillDirection.Horizontal
+TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+TabLayout.Padding = UDim.new(0, 4)
+TabLayout.Parent = TabsFrame
+
+local AktifTab = "Ana"
+local TabButonlar = {}
+local TabIcerikler = {}
+
+local function tabOlustur(id, yazi)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.25, -3, 1, 0)
+    btn.Text = yazi
+    btn.BackgroundColor3 = id == AktifTab and Color3.fromRGB(255, 0, 150) or Color3.fromRGB(30, 30, 40)
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 12
+    btn.LayoutOrder = #TabButonlar
+    btn.Parent = TabsFrame
+
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 8)
+    btnCorner.Parent = btn
+
+    addNeonButtonEffect(btn)
+
+    TabButonlar[id] = btn
+
+    local icerik = Instance.new("Frame")
+    icerik.Size = UDim2.new(1, -20, 1, -110)
+    icerik.Position = UDim2.new(0, 10, 0, 104)
+    icerik.BackgroundTransparency = 1
+    icerik.Visible = id == AktifTab
+    icerik.Parent = MainFrame
+
+    TabIcerikler[id] = icerik
+
+    btn.MouseButton1Click:Connect(function()
+        AktifTab = id
+        for tid, b in pairs(TabButonlar) do
+            b.BackgroundColor3 = tid == id and Color3.fromRGB(255, 0, 150) or Color3.fromRGB(30, 30, 40)
+        end
+        for tid, f in pairs(TabIcerikler) do
+            f.Visible = tid == id
+        end
+        sesCal(SesKutuphanesi.Tik, 0.2)
+    end)
+
+    return icerik
+end
+
+local AnaTab = tabOlustur("Ana", "🎯 HEDEF")
+local FavoriTab = tabOlustur("Favori", "⭐ FAVORİ")
+local GecmisTab = tabOlustur("Gecmis", "📜 GEÇMİŞ")
+local AyarlarTab = tabOlustur("Ayarlar", "⚙ AYARLAR")
+
+-- ============================================================
+-- ANA TAB - ALL BUTONU + ARAMA & LISTE
+-- ============================================================
+local AllButton = Instance.new("TextButton")
+AllButton.Size = UDim2.new(1, 0, 0, 36)
+AllButton.Position = UDim2.new(0, 0, 0, 0)
+AllButton.Text = "🌪️ ALL - TÜM OYUNCULARA FLING"
+AllButton.BackgroundColor3 = Color3.fromRGB(255, 0, 100)
+AllButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+AllButton.Font = Enum.Font.GothamBold
+AllButton.TextSize = 13
+AllButton.Parent = AnaTab
+addNeonButtonEffect(AllButton)
+
+local AllCorner = Instance.new("UICorner")
+AllCorner.CornerRadius = UDim.new(0, 10)
+AllCorner.Parent = AllButton
+
+local AllProgress = Instance.new("Frame")
+AllProgress.Size = UDim2.new(0, 0, 0, 4)
+AllProgress.Position = UDim2.new(0, 0, 1, -4)
+AllProgress.BackgroundColor3 = Color3.fromRGB(0, 255, 255)
+AllProgress.BorderSizePixel = 0
+AllProgress.Parent = AllButton
+AllProgress.Visible = false
+
+local AllProgressCorner = Instance.new("UICorner")
+AllProgressCorner.CornerRadius = UDim.new(0, 2)
+AllProgressCorner.Parent = AllProgress
+
+-- Arama Kutusu
+local SearchFrame = Instance.new("Frame")
+SearchFrame.Size = UDim2.new(1, 0, 0, 70)
+SearchFrame.Position = UDim2.new(0, 0, 0, 42)
+SearchFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+SearchFrame.BorderSizePixel = 0
+SearchFrame.Parent = AnaTab
+
+local SearchCorner = Instance.new("UICorner")
+SearchCorner.CornerRadius = UDim.new(0, 12)
+SearchCorner.Parent = SearchFrame
+
+local SearchLabel = Instance.new("TextLabel")
+SearchLabel.Size = UDim2.new(0.9, 0, 0, 22)
+SearchLabel.Position = UDim2.new(0.05, 0, 0, 4)
+SearchLabel.Text = "🔍 OYUNCU ARA"
+SearchLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+SearchLabel.BackgroundTransparency = 1
+SearchLabel.Font = Enum.Font.GothamBold
+SearchLabel.TextSize = 12
+SearchLabel.Parent = SearchFrame
+
+local SearchBox = Instance.new("TextBox")
+SearchBox.Size = UDim2.new(0.9, 0, 0, 36)
+SearchBox.Position = UDim2.new(0.05, 0, 0, 28)
+SearchBox.PlaceholderText = "İsim veya @kullaniciadi yaz..."
+SearchBox.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+SearchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+SearchBox.Font = Enum.Font.Gotham
+SearchBox.TextSize = 14
+SearchBox.ClearTextOnFocus = false
+SearchBox.Parent = SearchFrame
+
+local SearchBoxCorner = Instance.new("UICorner")
+SearchBoxCorner.CornerRadius = UDim.new(0, 10)
+SearchBoxCorner.Parent = SearchBox
+
+-- Oyuncu Listesi
+local PlayerList = Instance.new("ScrollingFrame")
+PlayerList.Size = UDim2.new(1, 0, 1, -120)
+PlayerList.Position = UDim2.new(0, 0, 0, 118)
+PlayerList.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+PlayerList.BorderSizePixel = 0
+PlayerList.ScrollBarThickness = 6
+PlayerList.ScrollBarImageColor3 = Color3.fromRGB(255, 0, 150)
+PlayerList.Parent = AnaTab
+
+local ListCorner = Instance.new("UICorner")
+ListCorner.CornerRadius = UDim.new(0, 12)
+ListCorner.Parent = PlayerList
+
+local ListLayout = Instance.new("UIListLayout")
+ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ListLayout.Padding = UDim.new(0, 6)
+ListLayout.Parent = PlayerList
+
+-- ============================================================
+-- FAVORI TAB
+-- ============================================================
+local FavoriLabel = Instance.new("TextLabel")
+FavoriLabel.Size = UDim2.new(1, 0, 0, 30)
+FavoriLabel.Text = "⭐ FAVORİ OYUNCULAR"
+FavoriLabel.TextColor3 = Color3.fromRGB(255, 200, 50)
+FavoriLabel.BackgroundTransparency = 1
+FavoriLabel.Font = Enum.Font.GothamBold
+FavoriLabel.TextSize = 14
+FavoriLabel.Parent = FavoriTab
+
+local FavoriList = Instance.new("ScrollingFrame")
+FavoriList.Size = UDim2.new(1, 0, 1, -40)
+FavoriList.Position = UDim2.new(0, 0, 0, 35)
+FavoriList.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+FavoriList.BorderSizePixel = 0
+FavoriList.ScrollBarThickness = 6
+FavoriList.ScrollBarImageColor3 = Color3.fromRGB(255, 0, 150)
+FavoriList.Parent = FavoriTab
+
+local FavoriListCorner = Instance.new("UICorner")
+FavoriListCorner.CornerRadius = UDim.new(0, 12)
+FavoriListCorner.Parent = FavoriList
+
+local FavoriListLayout = Instance.new("UIListLayout")
+FavoriListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+FavoriListLayout.Padding = UDim.new(0, 6)
+FavoriListLayout.Parent = FavoriList
+
+local FavoriBosLabel = Instance.new("TextLabel")
+FavoriBosLabel.Size = UDim2.new(1, 0, 0, 100)
+FavoriBosLabel.Text = "Henüz favori yok.\nBir oyuncuya ⭐ tıkla!"
+FavoriBosLabel.TextColor3 = Color3.fromRGB(100, 100, 100)
+FavoriBosLabel.BackgroundTransparency = 1
+FavoriBosLabel.Font = Enum.Font.Gotham
+FavoriBosLabel.TextSize = 13
+FavoriBosLabel.TextWrapped = true
+FavoriBosLabel.Parent = FavoriList
+
+-- ============================================================
+-- GECMIS TAB
+-- ============================================================
+local GecmisLabel = Instance.new("TextLabel")
+GecmisLabel.Size = UDim2.new(1, 0, 0, 30)
+GecmisLabel.Text = "📜 FLİNG GEÇMİŞİ"
+GecmisLabel.TextColor3 = Color3.fromRGB(0, 255, 255)
+GecmisLabel.BackgroundTransparency = 1
+GecmisLabel.Font = Enum.Font.GothamBold
+GecmisLabel.TextSize = 14
+GecmisLabel.Parent = GecmisTab
+
+local GecmisList = Instance.new("ScrollingFrame")
+GecmisList.Size = UDim2.new(1, 0, 1, -40)
+GecmisList.Position = UDim2.new(0, 0, 0, 35)
+GecmisList.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+GecmisList.BorderSizePixel = 0
+GecmisList.ScrollBarThickness = 6
+GecmisList.ScrollBarImageColor3 = Color3.fromRGB(255, 0, 150)
+GecmisList.Parent = GecmisTab
+
+local GecmisListCorner = Instance.new("UICorner")
+GecmisListCorner.CornerRadius = UDim.new(0, 12)
+GecmisListCorner.Parent = GecmisList
+
+local GecmisListLayout = Instance.new("UIListLayout")
+GecmisListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+GecmisListLayout.Padding = UDim.new(0, 6)
+GecmisListLayout.Parent = GecmisList
+
+-- ============================================================
+-- AYARLAR TAB
+-- ============================================================
+local AyarlarScroll = Instance.new("ScrollingFrame")
+AyarlarScroll.Size = UDim2.new(1, 0, 1, 0)
+AyarlarScroll.BackgroundTransparency = 1
+AyarlarScroll.ScrollBarThickness = 6
+AyarlarScroll.ScrollBarImageColor3 = Color3.fromRGB(255, 0, 150)
+AyarlarScroll.Parent = AyarlarTab
+
+local AyarlarLayout = Instance.new("UIListLayout")
+AyarlarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+AyarlarLayout.Padding = UDim.new(0, 10)
+AyarlarLayout.Parent = AyarlarScroll
+
+-- FLING GUCU AYARI
+local PowerSection = Instance.new("Frame")
+PowerSection.Size = UDim2.new(1, 0, 0, 100)
+PowerSection.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+PowerSection.BorderSizePixel = 0
+PowerSection.Parent = AyarlarScroll
+
+local PowerSectionCorner = Instance.new("UICorner")
+PowerSectionCorner.CornerRadius = UDim.new(0, 12)
+PowerSectionCorner.Parent = PowerSection
+
+local PowerTitle = Instance.new("TextLabel")
+PowerTitle.Size = UDim2.new(1, 0, 0, 28)
+PowerTitle.Position = UDim2.new(0, 0, 0, 5)
+PowerTitle.Text = "🌪️ DÖNME GÜCÜ"
+PowerTitle.TextColor3 = Color3.fromRGB(255, 0, 150)
+PowerTitle.BackgroundTransparency = 1
+PowerTitle.Font = Enum.Font.GothamBold
+PowerTitle.TextSize = 14
+PowerTitle.Parent = PowerSection
+
+local PowerValue = Instance.new("TextLabel")
+PowerValue.Size = UDim2.new(1, 0, 0, 32)
+PowerValue.Position = UDim2.new(0, 0, 0, 30)
+PowerValue.Text = tostring(CONFIG.VarsayilanGuc)
+PowerValue.TextColor3 = Color3.fromRGB(255, 255, 255)
+PowerValue.BackgroundTransparency = 1
+PowerValue.Font = Enum.Font.GothamBold
+PowerValue.TextSize = 24
+PowerValue.Parent = PowerSection
+
+local PowerButtonsFrame = Instance.new("Frame")
+PowerButtonsFrame.Size = UDim2.new(1, 0, 0, 32)
+PowerButtonsFrame.Position = UDim2.new(0, 0, 0, 64)
+PowerButtonsFrame.BackgroundTransparency = 1
+PowerButtonsFrame.Parent = PowerSection
+
+local function createPowerButton(text, pos, color)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.22, 0, 1, 0)
+    btn.Position = pos
+    btn.Text = text
+    btn.BackgroundColor3 = color
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 12
+    btn.Parent = PowerButtonsFrame
+    addNeonButtonEffect(btn)
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = btn
+
+    return btn
+end
+
+local PowerAzalt = createPowerButton("−10K", UDim2.new(0.05, 0, 0, 0), Color3.fromRGB(255, 50, 50))
+local PowerArtir = createPowerButton("+10K", UDim2.new(0.29, 0, 0, 0), Color3.fromRGB(50, 255, 50))
+local PowerMin = createPowerButton("MIN", UDim2.new(0.53, 0, 0, 0), Color3.fromRGB(80, 80, 90))
+local PowerMax = createPowerButton("MAX", UDim2.new(0.77, 0, 0, 0), Color3.fromRGB(80, 80, 90))
+
+local flingGucu = CONFIG.VarsayilanGuc
+
+-- ============================================================
+-- DÜZELTME #1 & #2: Toggle sistemi tamamen yeniden yazıldı
+-- Tek bir state, tek bir handler, çakışma yok
+-- ============================================================
+local ToggleStates = {
+    AntiFling = true,
+    Konum = true,
+    Hizli = false,
+    AllModu = true,
+    Bypass = false
+}
+
+local ToggleButtons = {}
+
+local function createToggle(parent, text, stateKey, colorActive, colorInactive)
+    local section = Instance.new("Frame")
+    section.Size = UDim2.new(1, 0, 0, 50)
+    section.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    section.BorderSizePixel = 0
+    section.Parent = parent
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = section
+
+    local toggle = Instance.new("TextButton")
+    toggle.Size = UDim2.new(0.9, 0, 0, 38)
+    toggle.Position = UDim2.new(0.05, 0, 0, 6)
+    toggle.Text = text .. (ToggleStates[stateKey] and ": AÇIK" or ": KAPALI")
+    toggle.BackgroundColor3 = ToggleStates[stateKey] and colorActive or colorInactive
+    toggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toggle.Font = Enum.Font.GothamBold
+    toggle.TextSize = 13
+    toggle.Parent = section
+    addNeonButtonEffect(toggle)
+
+    local tCorner = Instance.new("UICorner")
+    tCorner.CornerRadius = UDim.new(0, 10)
+    tCorner.Parent = toggle
+
+    ToggleButtons[stateKey] = toggle
+
+    toggle.MouseButton1Click:Connect(function()
+        ToggleStates[stateKey] = not ToggleStates[stateKey]
+        toggle.Text = text .. (ToggleStates[stateKey] and ": AÇIK" or ": KAPALI")
+        toggle.BackgroundColor3 = ToggleStates[stateKey] and colorActive or colorInactive
+        sesCal(SesKutuphanesi.Tik, 0.2)
+
+        -- Bypass özel işlem
+        if stateKey == "Bypass" and ToggleStates.Bypass then
+            activateAllBypasses()
+            sesCal(SesKutuphanesi.Uyari, 0.3)
+            StarterGui:SetCore("SendNotification", {
+                Title = "Bypass",
+                Text = "Tüm bypass sistemleri aktif!",
+                Duration = 3
+            })
+        end
+    end)
+
+    return toggle
+end
+
+createToggle(AyarlarScroll, "🛡️ ANTI-FLING", "AntiFling", Color3.fromRGB(50, 255, 50), Color3.fromRGB(255, 50, 50))
+createToggle(AyarlarScroll, "📍 KONUM KAYDET", "Konum", Color3.fromRGB(50, 255, 50), Color3.fromRGB(255, 50, 50))
+createToggle(AyarlarScroll, "⚡ HIZLI FLING", "Hizli", Color3.fromRGB(50, 255, 50), Color3.fromRGB(255, 50, 50))
+createToggle(AyarlarScroll, "🌪️ ALL MODU", "AllModu", Color3.fromRGB(50, 255, 50), Color3.fromRGB(255, 50, 50))
+createToggle(AyarlarScroll, "🔓 BYPASS MODU", "Bypass", Color3.fromRGB(50, 255, 50), Color3.fromRGB(255, 50, 50))
+
+-- Getter fonksiyonları
+local function getAntiFling() return ToggleStates.AntiFling end
+local function getKonum() return ToggleStates.Konum end
+local function getHizli() return ToggleStates.Hizli end
+local function getAllModu() return ToggleStates.AllModu end
+local function getBypass() return ToggleStates.Bypass end
+
+-- ============================================================
+-- DURUM CUBUGU
+-- ============================================================
+local StatusBar = Instance.new("Frame")
+StatusBar.Size = UDim2.new(1, 0, 0, 28)
+StatusBar.Position = UDim2.new(0, 0, 1, -28)
+StatusBar.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+StatusBar.BorderSizePixel = 0
+StatusBar.Parent = MainFrame
+
+local StatusBarCorner = Instance.new("UICorner")
+StatusBarCorner.CornerRadius = UDim.new(0, 0)
+StatusBarCorner.Parent = StatusBar
+
+local StatusFix = Instance.new("Frame")
+StatusFix.Size = UDim2.new(1, 0, 0, 14)
+StatusFix.Position = UDim2.new(0, 0, 0, 0)
+StatusFix.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+StatusFix.BorderSizePixel = 0
+StatusFix.Parent = StatusBar
+
+local StatusText = Instance.new("TextLabel")
+StatusText.Size = UDim2.new(1, -10, 1, 0)
+StatusText.Position = UDim2.new(0, 5, 0, 0)
+StatusText.Text = "✅ Hazır | Oyuncu: 0"
+StatusText.TextColor3 = Color3.fromRGB(150, 150, 150)
+StatusText.BackgroundTransparency = 1
+StatusText.Font = Enum.Font.Gotham
+StatusText.TextSize = 11
+StatusText.TextXAlignment = Enum.TextXAlignment.Left
+StatusText.Parent = StatusBar
+
+-- ============================================================
+-- KONTROL FONKSIYONLARI
+-- ============================================================
+PowerAzalt.MouseButton1Click:Connect(function()
+    flingGucu = math.max(CONFIG.MinGuc, flingGucu - CONFIG.GucAdim)
+    PowerValue.Text = tostring(flingGucu)
+    sesCal(SesKutuphanesi.Tik, 0.2)
+end)
+
+PowerArtir.MouseButton1Click:Connect(function()
+    flingGucu = math.min(CONFIG.MaxGuc, flingGucu + CONFIG.GucAdim)
+    PowerValue.Text = tostring(flingGucu)
+    sesCal(SesKutuphanesi.Tik, 0.2)
+end)
+
+PowerMin.MouseButton1Click:Connect(function()
+    flingGucu = CONFIG.MinGuc
+    PowerValue.Text = tostring(flingGucu)
+    sesCal(SesKutuphanesi.Tik, 0.2)
+end)
+
+PowerMax.MouseButton1Click:Connect(function()
+    flingGucu = CONFIG.MaxGuc
+    PowerValue.Text = tostring(flingGucu)
+    sesCal(SesKutuphanesi.Tik, 0.2)
+end)
+
+-- R tuşu - DÜZELTME #3: Güçlendirilmiş nil kontrolü
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Enum.KeyCode.R then
+        if getKonum() and eskiKonum ~= nil then
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+                    hum.PlatformStand = false
+                end
+                hrp.CFrame = eskiKonum
+                hrp.Velocity = Vector3.new(0, 0, 0)
+                hrp.RotVelocity = Vector3.new(0, 0, 0)
+                sesCal(SesKutuphanesi.GeriDonus, 0.4)
+            end
+        end
+    end
+end)
+
+-- ============================================================
+-- KUCULTME & KAPATMA
+-- ============================================================
+local minimized = false
+local kapali = false
+
+KucultButton.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        MainFrame:TweenSize(UDim2.new(0, CONFIG.GUI_Genislik, 0, 56), "Out", "Quad", CONFIG.AnimasyonHizi, true)
+        KucultButton.Text = "+"
+        for _, child in pairs(MainFrame:GetChildren()) do
+            if child:IsA("GuiObject") and child ~= TitleBar and child ~= KucultButton and child ~= KapatButton and child ~= AyarlarButton and child ~= Shadow and child ~= Glow then
+                child.Visible = false
+            end
+        end
+        Shadow.Visible = false
+        Glow.Visible = false
+    else
+        MainFrame:TweenSize(UDim2.new(0, CONFIG.GUI_Genislik, 0, CONFIG.GUI_Yukseklik), "Out", "Quad", CONFIG.AnimasyonHizi, true)
+        KucultButton.Text = "−"
+        for _, child in pairs(MainFrame:GetChildren()) do
+            if child:IsA("GuiObject") or child:IsA("ImageLabel") then
+                child.Visible = true
+            end
+        end
+        Shadow.Visible = true
+        Glow.Visible = true
+    end
+    sesCal(SesKutuphanesi.Tik, 0.2)
+end)
+
+KapatButton.MouseButton1Click:Connect(function()
+    kapali = true
+    sesCal(SesKutuphanesi.Tik, 0.2)
+    ScreenGui:Destroy()
+    for _, ses in ipairs(AktifSesler) do
+        pcall(function() ses:Destroy() end)
+    end
+    -- Tüm aktif bağlantıları temizle
+    for _, vurgu in pairs(AktifVurgular) do
+        pcall(function()
+            if vurgu.connection then vurgu.connection:Disconnect() end
+            if vurgu.highlight then vurgu.highlight:Destroy() end
+            if vurgu.billboard then vurgu.billboard:Destroy() end
+        end)
+    end
+end)
+
+-- ============================================================
+-- SURUKLEME
+-- ============================================================
+local dragging = false
+local dragStart = nil
+local startPos = nil
+
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- ============================================================
+-- KIRMIZI VURGU & MESAFE GOSTERGESI
+-- ============================================================
+local AktifVurgular = {}
+
+local function vurguKaldir(oyuncu)
+    local vurgu = AktifVurgular[oyuncu]
+    if not vurgu then return end
+
+    pcall(function()
+        if vurgu.connection then 
+            vurgu.connection:Disconnect() 
+            vurgu.connection = nil
+        end
+        if vurgu.highlight and vurgu.highlight.Parent then 
+            vurgu.highlight:Destroy() 
+        end
+        if vurgu.billboard and vurgu.billboard.Parent then 
+            vurgu.billboard:Destroy() 
+        end
+    end)
+
+    AktifVurgular[oyuncu] = nil
+end
+
+-- DÜZELTME #5: Oyuncu Character yeniden oluşturulduğunda vurgu temizleniyor
+local function vurguEkle(oyuncu)
+    if not getAllModu() then return end
+    if not oyuncu or not oyuncu.Character then return end
+
+    if AktifVurgular[oyuncu] then
+        vurguKaldir(oyuncu)
+    end
+
+    local char = oyuncu.Character
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "FlingV13_Vurgu"
+    highlight.FillColor = Color3.fromRGB(255, 0, 0)
+    highlight.OutlineColor = Color3.fromRGB(255, 100, 100)
+    highlight.FillTransparency = 0.3
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = char
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "FlingV13_Mesafe"
+    billboard.Size = UDim2.new(0, 120, 0, 40)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = hrp
+
+    local mesafeFrame = Instance.new("Frame")
+    mesafeFrame.Size = UDim2.new(1, 0, 1, 0)
+    mesafeFrame.BackgroundColor3 = Color3.fromRGB(180, 20, 20)
+    mesafeFrame.BackgroundTransparency = 0.2
+    mesafeFrame.BorderSizePixel = 0
+    mesafeFrame.Parent = billboard
+
+    local mesafeCorner = Instance.new("UICorner")
+    mesafeCorner.CornerRadius = UDim.new(0, 8)
+    mesafeCorner.Parent = mesafeFrame
+
+    local mesafeLabel = Instance.new("TextLabel")
+    mesafeLabel.Size = UDim2.new(1, -4, 1, -4)
+    mesafeLabel.Position = UDim2.new(0, 2, 0, 2)
+    mesafeLabel.Text = "0m"
+    mesafeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    mesafeLabel.BackgroundTransparency = 1
+    mesafeLabel.Font = Enum.Font.GothamBold
+    mesafeLabel.TextSize = 14
+    mesafeLabel.Parent = mesafeFrame
+
+    local mesafeConnection = RunService.Heartbeat:Connect(function()
+        local benimChar = LocalPlayer.Character
+        local benimHrp = benimChar and benimChar:FindFirstChild("HumanoidRootPart")
+        local hedefHrp = oyuncu.Character and oyuncu.Character:FindFirstChild("HumanoidRootPart")
+
+        if benimHrp and hedefHrp then
+            local uzaklik = (benimHrp.Position - hedefHrp.Position).Magnitude
+            mesafeLabel.Text = string.format("%.1fm", uzaklik)
+        else
+            mesafeLabel.Text = "?"
+        end
+    end)
+
+    AktifVurgular[oyuncu] = {
+        highlight = highlight,
+        billboard = billboard,
+        connection = mesafeConnection
+    }
+
+    -- Character yeniden oluşturulduğunda vurguyu temizle
+    local charConnection
+    charConnection = oyuncu.CharacterAdded:Connect(function()
+        vurguKaldir(oyuncu)
+        if charConnection then
+            charConnection:Disconnect()
+        end
+    end)
+
+    task.delay(CONFIG.VurguSuresi, function()
+        vurguKaldir(oyuncu)
+        if charConnection then
+            charConnection:Disconnect()
+        end
+    end)
+end
+
+-- ============================================================
+-- FLING FONKSIYONU
+-- ============================================================
+
+-- DÜZELTME #9: Motor6D ve Weld kontrolü eklendi
+local function antiRagdoll(char)
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.PlatformStand = false
+        hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+        for _, v in ipairs(char:GetDescendants()) do
+            if v:IsA("JointInstance") or v:IsA("Motor6D") or v:IsA("Weld") then
+                pcall(function() v.Enabled = true end)
+            end
+        end
+    end
+end
+
+local function setCollision(char, durum)
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = durum
+        end
+    end
+end
+
+-- DÜZELTME #8: Fling sırasında hedef çıkarsa güvenli çıkış
+local function flingHedef(hedefOyuncu, allModu)
+    allModu = allModu or false
+
+    if not hedefOyuncu or not hedefOyuncu.Character then
+        return false, "Hedef oyuncu bulunamadi"
+    end
+
+    local char = LocalPlayer.Character
+    if not char then
+        return false, "Karakter bulunamadi"
+    end
+
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local tChar = hedefOyuncu.Character
+    local tHrp = tChar and tChar:FindFirstChild("HumanoidRootPart")
+
+    if not hrp or not hum then
+        return false, "Karakter parcalari eksik"
+    end
+
+    if not tHrp then
+        return false, "Hedef karakteri eksik"
+    end
+
+    if getKonum() then
+        eskiKonum = hrp.CFrame
+    end
+
+    Veriler.Istatistikler.ToplamFling = Veriler.Istatistikler.ToplamFling + 1
+    Veriler.Istatistikler.SonFling = hedefOyuncu.DisplayName
+
+    table.insert(Veriler.Gecmis, 1, {
+        isim = hedefOyuncu.DisplayName,
+        kullanici = hedefOyuncu.Name,
+        zaman = os.date("%H:%M:%S"),
+        tarih = os.date("%d.%m.%Y")
+    })
+    if #Veriler.Gecmis > CONFIG.MaxGecmis then
+        table.remove(Veriler.Gecmis)
+    end
+    veriKaydet()
+
+    if allModu and getAllModu() then
+        vurguEkle(hedefOyuncu)
+    end
+
+    antiRagdoll(char)
+
+    if getBypass() then
+        pcall(function()
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part:SetNetworkOwner(nil)
+                end
+            end
+        end)
+    end
+
+    local noclipConnection = nil
+    if getAntiFling() then
+        noclipConnection = RunService.Stepped:Connect(function()
+            setCollision(char, false)
+        end)
+    end
+
+    hum:ChangeState(Enum.HumanoidStateType.Physics)
+    hum.PlatformStand = true
+
+    local bAV = Instance.new("BodyAngularVelocity")
+    bAV.Name = "FlingV13_Force"
+    bAV.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    bAV.AngularVelocity = Vector3.new(0, flingGucu, 0)
+    bAV.Parent = hrp
+
+    if getHizli() then
+        bAV.AngularVelocity = Vector3.new(0, flingGucu * 1.5, 0)
+    end
+
+    local baslangicZaman = tick()
+    local followConnection
+    local flingBasarili = false
+
+    followConnection = RunService.Heartbeat:Connect(function()
+        if kapali then
+            if followConnection then followConnection:Disconnect() end
+            return
+        end
+
+        -- DÜZELTME #8: Hedef oyuncu sunucudan çıktı mı kontrolü
+        if not hedefOyuncu.Parent then
+            if followConnection then
+                followConnection:Disconnect()
+                followConnection = nil
+            end
+            return
+        end
+
+        local gecenSure = tick() - baslangicZaman
+        local maxSure = getHizli() and CONFIG.FlingSuresi * 0.6 or CONFIG.FlingSuresi
+
+        if gecenSure > maxSure or not tHrp or not tHrp.Parent then
+            if followConnection then
+                followConnection:Disconnect()
+                followConnection = nil
+            end
+            return
+        end
+
+        pcall(function()
+            if hrp and tHrp and hrp.Parent and tHrp.Parent then
+                local offset = CFrame.new(0, -CONFIG.TakipMesafesi, 0)
+                hrp.CFrame = tHrp.CFrame * offset
+                hrp.Velocity = Vector3.new(0, 0, 0)
+                hrp.RotVelocity = Vector3.new(0, flingGucu, 0)
+                flingBasarili = true
+            end
+        end)
+    end)
+
+    local beklemeSuresi = getHizli() and CONFIG.FlingSuresi * 0.6 or CONFIG.FlingSuresi
+    task.wait(beklemeSuresi + 0.1)
+
+    pcall(function()
+        if bAV then bAV:Destroy() end
+    end)
+
+    if followConnection then
+        followConnection:Disconnect()
+        followConnection = nil
+    end
+
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+
+    pcall(function()
+        if hrp and hrp.Parent then
+            -- DÜZELTME #3: eskiKonum nil kontrolü
+            if eskiKonum ~= nil and getKonum() then
+                hrp.CFrame = eskiKonum
+            end
+            hrp.Velocity = Vector3.new(0, 0, 0)
+            hrp.RotVelocity = Vector3.new(0, 0, 0)
+        end
+        antiRagdoll(char)
+    end)
+
+    task.wait(0.1)
+    setCollision(char, true)
+
+    if flingBasarili then
+        Veriler.Istatistikler.BasariliFling = Veriler.Istatistikler.BasariliFling + 1
+        return true, "Basarili"
+    else
+        return false, "Fling basarisiz"
+    end
+end
+
+-- ============================================================
+-- ALL MODU
+-- ============================================================
+local allCalisiyor = false
+
+local function allFlingBaslat()
+    if allCalisiyor then return end
+    if not getAllModu() then
+        StarterGui:SetCore("SendNotification", {
+            Title = "ALL MODU",
+            Text = "ALL modu ayarlardan kapalı!",
+            Duration = 3
+        })
+        return
+    end
+
+    allCalisiyor = true
+    AllButton.Text = "🌪️ ALL ÇALIŞIYOR..."
+    AllButton.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
+    AllProgress.Visible = true
+    sesCal(SesKutuphanesi.AllStart, 0.5)
+
+    local hedefler = {}
+    for _, oyuncu in ipairs(Players:GetPlayers()) do
+        if oyuncu ~= LocalPlayer then
+            table.insert(hedefler, oyuncu)
+        end
+    end
+
+    local toplam = #hedefler
+    local basarili = 0
+
+    if toplam == 0 then
+        AllProgress.Visible = false
+        AllButton.Text = "🌪️ ALL - TÜM OYUNCULARA FLING"
+        AllButton.BackgroundColor3 = Color3.fromRGB(255, 0, 100)
+        allCalisiyor = false
+        StarterGui:SetCore("SendNotification", {
+            Title = "ALL Modu",
+            Text = "Sunucuda başka oyuncu yok!",
+            Duration = 3
+        })
+        return
+    end
+
+    for i, oyuncu in ipairs(hedefler) do
+        if kapali then break end
+
+        -- DÜZELTME #4: Tween animasyonlu progress
+        local progress = i / toplam
+        local tween = TweenService:Create(AllProgress, TweenInfo.new(0.3), {
+            Size = UDim2.new(progress, 0, 0, 4)
+        })
+        tween:Play()
+
+        AllButton.Text = string.format("🌪️ FLING: %s (%d/%d)", oyuncu.DisplayName, i, toplam)
+
+        local ok, msg = pcall(function()
+            return flingHedef(oyuncu, true)
+        end)
+
+        if ok and msg then basarili = basarili + 1 end
+
+        if i < toplam then
+            task.wait(CONFIG.AllModuBekleme)
+        end
+    end
+
+    -- Progress sıfırla
+    local resetTween = TweenService:Create(AllProgress, TweenInfo.new(0.5), {
+        Size = UDim2.new(0, 0, 0, 4)
+    })
+    resetTween:Play()
+
+    task.wait(0.5)
+    AllProgress.Visible = false
+    AllButton.Text = "🌪️ ALL - TÜM OYUNCULARA FLING"
+    AllButton.BackgroundColor3 = Color3.fromRGB(255, 0, 100)
+    allCalisiyor = false
+
+    sesCal(SesKutuphanesi.AllDone, 0.5)
+    StarterGui:SetCore("SendNotification", {
+        Title = "ALL Tamamlandı",
+        Text = string.format("%d/%d oyuncuya fling atıldı!", basarili, toplam),
+        Duration = 4
+    })
+end
+
+AllButton.MouseButton1Click:Connect(function()
+    if allCalisiyor then return end
+    task.spawn(allFlingBaslat)
+end)
+
+-- ============================================================
+-- FAVORI YONETIMI
+-- ============================================================
+local function favoriEkle(oyuncu)
+    for _, f in ipairs(Veriler.Favoriler) do
+        if f.kullanici == oyuncu.Name then
+            return false
+        end
+    end
+
+    table.insert(Veriler.Favoriler, {
+        isim = oyuncu.DisplayName,
+        kullanici = oyuncu.Name
+    })
+
+    if #Veriler.Favoriler > CONFIG.MaxFavori then
+        table.remove(Veriler.Favoriler, 1)
+    end
+
+    veriKaydet()
+    return true
+end
+
+local function favoriKaldir(kullaniciAdi)
+    for i, f in ipairs(Veriler.Favoriler) do
+        if f.kullanici == kullaniciAdi then
+            table.remove(Veriler.Favoriler, i)
+            veriKaydet()
+            return true
+        end
+    end
+    return false
+end
+
+-- ============================================================
+-- OYUNCU LISTESI - DÜZELTİLMİŞ TEMİZLİK
+-- ============================================================
+local function oyuncuButonuOlustur(oyuncu, parent, isFavori)
+    local Buton = Instance.new("TextButton")
+    Buton.Name = oyuncu.Name
+    Buton.Size = UDim2.new(1, -12, 0, 50)
+    Buton.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    Buton.Text = ""
+    Buton.AutoButtonColor = true
+    Buton.Parent = parent
+
+    local ButonKose = Instance.new("UICorner")
+    ButonKose.CornerRadius = UDim.new(0, 10)
+    ButonKose.Parent = Buton
+
+    -- Neon stroke
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(255, 0, 150)
+    stroke.Thickness = 1
+    stroke.Transparency = 0.9
+    stroke.Parent = Buton
+
+    local IsimLabel = Instance.new("TextLabel")
+    IsimLabel.Size = UDim2.new(0.7, 0, 0.6, 0)
+    IsimLabel.Position = UDim2.new(0, 12, 0, 2)
+    IsimLabel.Text = oyuncu.DisplayName
+    IsimLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    IsimLabel.BackgroundTransparency = 1
+    IsimLabel.Font = Enum.Font.GothamBold
+    IsimLabel.TextSize = 14
+    IsimLabel.TextXAlignment = Enum.TextXAlignment.Left
+    IsimLabel.Parent = Buton
+
+    local KullaniciLabel = Instance.new("TextLabel")
+    KullaniciLabel.Size = UDim2.new(0.7, 0, 0.4, 0)
+    KullaniciLabel.Position = UDim2.new(0, 12, 0.55, 0)
+    KullaniciLabel.Text = "@" .. oyuncu.Name
+    KullaniciLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+    KullaniciLabel.BackgroundTransparency = 1
+    KullaniciLabel.Font = Enum.Font.Gotham
+    KullaniciLabel.TextSize = 11
+    KullaniciLabel.TextXAlignment = Enum.TextXAlignment.Left
+    KullaniciLabel.Parent = Buton
+
+    local Status = Instance.new("Frame")
+    Status.Size = UDim2.new(0, 12, 0, 12)
+    Status.Position = UDim2.new(1, -22, 0.5, -6)
+    Status.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+    Status.BorderSizePixel = 0
+    Status.Parent = Buton
+
+    local StatusCorner = Instance.new("UICorner")
+    StatusCorner.CornerRadius = UDim.new(1, 0)
+    StatusCorner.Parent = Status
+
+    local FavButton = nil
+    if not isFavori then
+        FavButton = Instance.new("TextButton")
+        FavButton.Size = UDim2.new(0, 28, 0, 28)
+        FavButton.Position = UDim2.new(1, -56, 0.5, -14)
+        FavButton.Text = "⭐"
+        FavButton.BackgroundTransparency = 1
+        FavButton.TextColor3 = Color3.fromRGB(100, 100, 100)
+        FavButton.Font = Enum.Font.GothamBold
+        FavButton.TextSize = 16
+        FavButton.Parent = Buton
+
+        for _, f in ipairs(Veriler.Favoriler) do
+            if f.kullanici == oyuncu.Name then
+                FavButton.TextColor3 = Color3.fromRGB(255, 200, 50)
+                break
+            end
+        end
+
+        FavButton.MouseButton1Click:Connect(function()
+            local eklendi = favoriEkle(oyuncu)
+            if eklendi then
+                FavButton.TextColor3 = Color3.fromRGB(255, 200, 50)
+                sesCal(SesKutuphanesi.Basari, 0.3)
+                StarterGui:SetCore("SendNotification", {
+                    Title = "Favori",
+                    Text = oyuncu.DisplayName .. " favorilere eklendi!",
+                    Duration = 2
+                })
+                favoriListesiGuncelle()
+            else
+                sesCal(SesKutuphanesi.Uyari, 0.3)
+            end
+        end)
+    else
+        local KaldirButton = Instance.new("TextButton")
+        KaldirButton.Size = UDim2.new(0, 28, 0, 28)
+        KaldirButton.Position = UDim2.new(1, -56, 0.5, -14)
+        KaldirButton.Text = "🗑"
+        KaldirButton.BackgroundTransparency = 1
+        KaldirButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+        KaldirButton.Font = Enum.Font.GothamBold
+        KaldirButton.TextSize = 16
+        KaldirButton.Parent = Buton
+
+        KaldirButton.MouseButton1Click:Connect(function()
+            favoriKaldir(oyuncu.Name)
+            sesCal(SesKutuphanesi.Tik, 0.2)
+            favoriListesiGuncelle()
+        end)
+    end
+
+    Buton.MouseEnter:Connect(function()
+        TweenService:Create(Buton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(50, 50, 70)}):Play()
+        TweenService:Create(stroke, TweenInfo.new(0.2), {Transparency = 0.5}):Play()
+    end)
+
+    Buton.MouseLeave:Connect(function()
+        TweenService:Create(Buton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(30, 30, 40)}):Play()
+        TweenService:Create(stroke, TweenInfo.new(0.2), {Transparency = 0.9}):Play()
+    end)
+
+    Buton.MouseButton1Click:Connect(function()
+        if not FavButton or (FavButton and not UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)) then
+            IsimLabel.Text = "FLING EDILIYOR..."
+            IsimLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+            Status.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+            sesCal(SesKutuphanesi.Fling, 0.4)
+
+            local basarili, mesaj = flingHedef(oyuncu, false)
+
+            if basarili then
+                IsimLabel.Text = oyuncu.DisplayName .. " ✓"
+                IsimLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
+                Status.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+                sesCal(SesKutuphanesi.Basari, 0.4)
+                task.wait(1.5)
+            else
+                IsimLabel.Text = oyuncu.DisplayName .. " ✗"
+                IsimLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+                Status.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+                sesCal(SesKutuphanesi.Hata, 0.4)
+                task.wait(1.5)
+            end
+
+            IsimLabel.Text = oyuncu.DisplayName
+            IsimLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            Status.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+        end
+    end)
+
+    return Buton
+end
+
+-- DÜZELTME #10: UIListLayout temizlik kodu basitleştirildi
+local function temizleListe(liste)
+    for _, cocuk in ipairs(liste:GetChildren()) do
+        if cocuk:IsA("GuiObject") and not cocuk:IsA("UIListLayout") and not cocuk:IsA("UIPadding") then
+            cocuk:Destroy()
+        end
+    end
+end
+
+local function oyuncuListesiGuncelle(aramaMetni)
+    aramaMetni = aramaMetni or ""
+    aramaMetni = string.lower(aramaMetni)
+
+    temizleListe(PlayerList)
+
+    local oyuncuSayisi = 0
+    for _, oyuncu in ipairs(Players:GetPlayers()) do
+        if oyuncu ~= LocalPlayer then
+            local oyuncuAdi = string.lower(oyuncu.Name)
+            local gosterimAdi = string.lower(oyuncu.DisplayName)
+
+            if aramaMetni == "" or string.find(oyuncuAdi, aramaMetni) or string.find(gosterimAdi, aramaMetni) then
+                oyuncuButonuOlustur(oyuncu, PlayerList, false)
+                oyuncuSayisi = oyuncuSayisi + 1
+            end
+        end
+    end
+
+    PlayerList.CanvasSize = UDim2.new(0, 0, 0, oyuncuSayisi * 56)
+    StatusText.Text = "✅ Hazır | Oyuncu: " .. tostring(oyuncuSayisi)
+end
+
+local function favoriListesiGuncelle()
+    temizleListe(FavoriList)
+
+    if #Veriler.Favoriler == 0 then
+        FavoriBosLabel.Visible = true
+    else
+        FavoriBosLabel.Visible = false
+        for _, fav in ipairs(Veriler.Favoriler) do
+            local oyuncu = Players:FindFirstChild(fav.kullanici)
+            if oyuncu then
+                oyuncuButonuOlustur(oyuncu, FavoriList, true)
+            end
+        end
+    end
+
+    FavoriList.CanvasSize = UDim2.new(0, 0, 0, #Veriler.Favoriler * 56)
+end
+
+local function gecmisListesiGuncelle()
+    temizleListe(GecmisList)
+
+    for _, gecmis in ipairs(Veriler.Gecmis) do
+        local Buton = Instance.new("TextButton")
+        Buton.Size = UDim2.new(1, -12, 0, 50)
+        Buton.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+        Buton.Text = ""
+        Buton.Parent = GecmisList
+
+        local ButonKose = Instance.new("UICorner")
+        ButonKose.CornerRadius = UDim.new(0, 10)
+        ButonKose.Parent = Buton
+
+        local IsimLabel = Instance.new("TextLabel")
+        IsimLabel.Size = UDim2.new(0.7, 0, 0.6, 0)
+        IsimLabel.Position = UDim2.new(0, 12, 0, 2)
+        IsimLabel.Text = gecmis.isim
+        IsimLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        IsimLabel.BackgroundTransparency = 1
+        IsimLabel.Font = Enum.Font.GothamBold
+        IsimLabel.TextSize = 14
+        IsimLabel.TextXAlignment = Enum.TextXAlignment.Left
+        IsimLabel.Parent = Buton
+
+        local KullaniciLabel = Instance.new("TextLabel")
+        KullaniciLabel.Size = UDim2.new(0.7, 0, 0.4, 0)
+        KullaniciLabel.Position = UDim2.new(0, 12, 0.55, 0)
+        KullaniciLabel.Text = "@" .. gecmis.kullanici .. " | " .. gecmis.zaman
+        KullaniciLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+        KullaniciLabel.BackgroundTransparency = 1
+        KullaniciLabel.Font = Enum.Font.Gotham
+        KullaniciLabel.TextSize = 11
+        KullaniciLabel.TextXAlignment = Enum.TextXAlignment.Left
+        KullaniciLabel.Parent = Buton
+
+        local TekrarButton = Instance.new("TextButton")
+        TekrarButton.Size = UDim2.new(0, 28, 0, 28)
+        TekrarButton.Position = UDim2.new(1, -40, 0.5, -14)
+        TekrarButton.Text = "🔄"
+        TekrarButton.BackgroundTransparency = 1
+        TekrarButton.TextColor3 = Color3.fromRGB(0, 255, 255)
+        TekrarButton.Font = Enum.Font.GothamBold
+        TekrarButton.TextSize = 16
+        TekrarButton.Parent = Buton
+
+        TekrarButton.MouseButton1Click:Connect(function()
+            local oyuncu = Players:FindFirstChild(gecmis.kullanici)
+            if oyuncu then
+                flingHedef(oyuncu, false)
+            end
+        end)
+    end
+
+    GecmisList.CanvasSize = UDim2.new(0, 0, 0, #Veriler.Gecmis * 56)
+end
+
+-- Arama kutusu event
+SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    oyuncuListesiGuncelle(SearchBox.Text)
+end)
+
+-- Oyuncu ekleme/çıkma eventleri
+Players.PlayerAdded:Connect(function()
+    task.wait(0.5)
+    oyuncuListesiGuncelle(SearchBox.Text)
+end)
+
+Players.PlayerRemoving:Connect(function()
+    task.wait(0.5)
+    oyuncuListesiGuncelle(SearchBox.Text)
+end)
+
+-- İlk yükleme
+oyuncuListesiGuncelle()
+favoriListesiGuncelle()
+gecmisListesiGuncelle()
+
+-- İstatistik güncelleme
+RunService.Heartbeat:Connect(function()
+    StatsLabel.Text = string.format("Toplam: %d | Başarılı: %d", 
+        Veriler.Istatistikler.ToplamFling, 
+        Veriler.Istatistikler.BasariliFling)
+end)
+
+-- ============================================================
+-- NEON ANIMASYONLAR
+-- ============================================================
+task.spawn(function()
+    while not kapali do
+        for _, effect in ipairs(NeonEffects) do
+            if effect and effect.Parent then
+                if effect:IsA("UIGradient") then
+                    for i = 0, 1, 0.01 do
+                        if kapali then break end
+                        effect.Offset = Vector2.new(i, 0)
+                        task.wait(CONFIG.NeonHiz)
+                    end
+                elseif effect:IsA("ImageLabel") then
+                    for i = 0.6, 0.9, 0.01 do
+                        if kapali then break end
+                        effect.ImageTransparency = i
+                        task.wait(CONFIG.GlowHiz)
+                    end
+                    for i = 0.9, 0.6, -0.01 do
+                        if kapali then break end
+                        effect.ImageTransparency = i
+                        task.wait(CONFIG.GlowHiz)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- ============================================================
+-- HAZIR - TAMAMLANDI
+-- ============================================================
+print("🔥 FLING V13 NETARZ v2.2 - Tüm sistemler aktif!")
+print("🌪️ ALL Modu: " .. (getAllModu() and "AÇIK" or "KAPALI"))
+print("🛡️ Anti-Fling: " .. (getAntiFling() and "AÇIK" or "KAPALI"))
+print("📍 Konum Kaydet: " .. (getKonum() and "AÇIK" or "KAPALI"))
+print("🔓 Bypass: " .. (getBypass() and "AÇIK" or "KAPALI"))
+print("⚡ Hızlı Fling: " .. (getHizli() and "AÇIK" or "KAPALI"))
+print("🎨 Netarz Efektler: AKTİF")
+print("🛡️ Anti-Cheat Bypass: HAZIR (Ayarlar'dan aktif edin)")
+print("✅ Düzeltmeler v2.2: BypassToggle, eskiKonum, AllProgress, VurguTemizlik, NetworkOpt, MatrixFont, HedefÇıkış, Motor6D, UIListLayout, pcall")
