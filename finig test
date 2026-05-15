@@ -1,22 +1,11 @@
 -- ============================================================
 -- FLING V13 - GELİŞMİŞ FLING SİSTEMİ v2.2 (TAMAMEN DÜZELTİLMİŞ)
--- Anti-Fling, Anti-Ragdoll, Hızlı Dönüş, Bypass Destekli
--- Netarz (Neon) Efektler, Gelişmiş Anti-Cheat Bypass
 -- ALL MODU - Tüm Oyunculara Otomatik Fling
 -- 
 -- DÜZELTİLENLER v2.2:
 -- 1. BypassToggle çift handler hatası TAMAMEN giderildi
 -- 2. getBypass/getAllModu tutarsızlığı düzeltildi
--- 3. eskiKonum nil kontrolü güçlendirildi
--- 4. AllProgress tween animasyonu eklendi
--- 5. Oyuncu Character yeniden oluşturulduğunda vurgu otomatik temizleniyor
--- 6. Network ownership bypass optimize edildi (event-based)
--- 7. Matrix efekti ASCII karakterlere çevrildi (font uyumluluğu)
--- 8. Fling sırasında hedef çıkarsa güvenli çıkış eklendi
--- 9. antiRagdoll Motor6D ve Weld kontrolü eklendi
--- 10. UIListLayout temizlik kodu basitleştirildi
--- 11. Tüm pcall'lar güçlendirildi, hata mesajları detaylandırıldı
--- 12. Memory leak önlemleri eklendi (connection temizliği)
+--
 -- ============================================================
 
 local Players = game:GetService("Players")
