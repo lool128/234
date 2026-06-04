@@ -1,0 +1,184 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+
+local rcthp = 0.10
+local rctduration = 5
+local rctcooldown = 0.001
+
+local rcton = false
+local invisActive = false
+local lastHealth = nil
+
+
+
+local function activateInvis(character)
+	if not character then return end
+
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	local savedCFrame = hrp.CFrame
+
+	character:MoveTo(Vector3.new( 25.95, 84, 3537.55))
+	task.wait(0.15)
+
+	local seat = Instance.new("Seat")
+	seat.Name = "invischair"
+	seat.Anchored = false
+	seat.CanCollide = false
+	seat.Transparency = 1
+	seat.CFrame = savedCFrame
+	seat.Parent = workspace
+
+	local weld = Instance.new("Weld")
+	weld.Part0 = seat
+	weld.Part1 = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+	weld.Parent = seat
+
+	return seat
+end
+
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 100
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local bg = Instance.new("ImageLabel")
+bg.Size = UDim2.new(1,0,1,0)
+bg.BackgroundTransparency = 1
+bg.ImageTransparency = 1
+bg.ScaleType = Enum.ScaleType.Stretch
+bg.Parent = screenGui
+
+local flash = Instance.new("Frame")
+flash.Size = UDim2.new(1,0,1,0)
+flash.BackgroundColor3 = Color3.new(0,0,0)
+flash.BackgroundTransparency = 1
+flash.ZIndex = 2
+flash.Parent = screenGui
+
+local images = {
+	"rbxassetid://86203121575241",
+	"rbxassetid://15139488569",
+	"rbxassetid://18418395307",
+	"rbxassetid://16162403620"
+}
+local imgIndex = 1
+
+local sounds = {
+	"rbxassetid://4809574295",
+	"rbxassetid://5178876770",
+	"rbxassetid://7772283448",
+	"rbxassetid://128203359964443"
+}
+
+local sound = Instance.new("Sound")
+sound.Volume = 1
+sound.Parent = screenGui
+
+local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+local function flashScreen()
+	bg.Image = images[imgIndex]
+	imgIndex = imgIndex % #images + 1
+
+	bg.ImageTransparency = 0
+	flash.BackgroundTransparency = 0
+
+	TweenService:Create(bg, tweenInfo, {ImageTransparency = 1}):Play()
+	TweenService:Create(flash, tweenInfo, {BackgroundTransparency = 1}):Play()
+
+	sound.SoundId = sounds[math.random(#sounds)]
+	sound:Play()
+end
+
+
+
+local rctGui = Instance.new("ScreenGui")
+rctGui.Name = "RCTGui"
+rctGui.ResetOnSpawn = false
+rctGui.Parent = player.PlayerGui
+
+local button = Instance.new("TextLabel")
+button.Size = UDim2.new(0,200,0,50)
+button.Position = UDim2.new(0,1370,0, 57)
+button.TextScaled = true
+button.Font = Enum.Font.SourceSansBold
+button.BackgroundColor3 = Color3.fromRGB(255,0,0)
+button.TextColor3 = Color3.fromRGB(0,0,0)
+button.Text = "RCT / OFF"
+button.Parent = rctGui
+
+
+
+local function triggerInvis(character)
+	if invisActive then return end
+	invisActive = true
+
+	flashScreen()
+	local seat = activateInvis(character)
+
+	task.delay(rctduration, function()
+		if seat then seat:Destroy() end
+	end)
+
+	task.delay(rctcooldown, function()
+		invisActive = false
+	end)
+end
+
+
+local function hookHumanoid(humanoid)
+	lastHealth = humanoid.Health
+
+	humanoid:GetPropertyChangedSignal("Health"):Connect(function()
+		if not RCT_ON or invisActive then
+			lastHealth = humanoid.Health
+			return
+		end
+
+		local newHealth = humanoid.Health
+		local maxHealth = humanoid.MaxHealth
+
+		if newHealth < lastHealth then
+			local percent = newHealth / maxHealth
+
+			if newHealth <= 0 or percent <= rcthp then
+				humanoid.Health = math.max(1, maxHealth * rcthp)
+
+				triggerInvis(player.Character)
+			end
+		end
+
+		lastHealth = humanoid.Health
+	end)
+end
+
+
+
+
+UserInputService.InputBegan:Connect(function(input, gp)
+	if gp then return end
+	if input.KeyCode == Enum.KeyCode.E then
+		RCT_ON = not RCT_ON
+		button.Text = RCT_ON and "RCT / ON" or "RCT / OFF"
+		button.BackgroundColor3 = RCT_ON and Color3.fromRGB(0,200,0) or Color3.fromRGB(255,0,0)
+	end
+end)
+
+
+
+local function onCharacter(char)
+	invisActive = false
+	local hum = char:WaitForChild("Humanoid")
+	hookHumanoid(hum)
+end
+
+if player.Character then
+	onCharacter(player.Character)
+end
