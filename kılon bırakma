@@ -1,0 +1,899 @@
+--[[
+    ╔══════════════════════════════════════════════════════════════╗
+    ║        KILASIK'S ULTIMATE v7.1 FIXED - TÜRKÇE EDITION      ║
+    ║  Düzeltmeler: Değer kutuları, bağlantı temizliği, CloseBtn   ║
+    ╚══════════════════════════════════════════════════════════════╝
+--]]
+
+local Player = game.Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+
+-- ==================== MOBİL KONTROLLER ====================
+local Controls = nil
+pcall(function()
+    local PlayerModule = require(Player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule"))
+    Controls = PlayerModule:GetControls()
+end)
+
+-- ==================== TEMEL DEĞİŞKENLER ====================
+local isModeOn = false
+local autoActive = false
+local teleportOnClose = true
+local hideRealBody = false
+local noclipActive = false
+local flyActive = false
+local shiftLockActive = false
+local fullbrightActive = false
+local freecamActive = false
+local zoomExtenderActive = false
+local godModeActive = false
+local espActive = false
+local uiVisible = true
+local isMinimized = false
+
+local RealChar = nil
+local FakeChar = nil
+local CloneConns = {}
+local MiscConns = {}
+local AnimTracks = {}
+local ESPObjects = {}
+local ESPConns = {}
+local originalCF = nil
+
+-- Değer kutuları için global referanslar
+local TimeBox, SpeedBox, JumpBox
+
+-- ==================== ANİMASYON ID'LERİ ====================
+local OfficialIDs = {
+    Idle = "rbxassetid://507766388",
+    Walk = "rbxassetid://507777826",
+    Run = "rbxassetid://507767714",
+    Jump = "rbxassetid://507765000",
+    Fall = "rbxassetid://507767968",
+    Climb = "rbxassetid://507765644",
+    Swim = "rbxassetid://507784064"
+}
+
+-- ==================== YARDIMCI FONKSİYONLAR ====================
+local function LoadAnim(hum, id)
+    local a = Instance.new("Animation")
+    a.AnimationId = id
+    return hum:LoadAnimation(a)
+end
+
+local function StopAll()
+    for _, track in pairs(AnimTracks) do
+        if track and track.IsPlaying then track:Stop(0.1) end
+    end
+end
+
+local function CreateCorner(parent, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = radius or UDim.new(0, 6)
+    c.Parent = parent
+    return c
+end
+
+local function CreateStroke(parent, color, thickness)
+    local s = Instance.new("UIStroke")
+    s.Color = color or Color3.fromRGB(0, 0, 0)
+    s.Thickness = thickness or 2
+    s.Parent = parent
+    return s
+end
+
+local function Tween(obj, props, duration)
+    TweenService:Create(obj, TweenInfo.new(duration or 0.3, Enum.EasingStyle.Quad), props):Play()
+end
+
+local function SafeDisconnect(conn)
+    if conn then pcall(function() conn:Disconnect() end) end
+end
+
+local function ClearTable(t)
+    for _, conn in pairs(t) do SafeDisconnect(conn) end
+    table.clear(t)
+end
+
+-- ==================== UI OLUŞTURMA ====================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "KilasikUltimate_v71"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = Player:WaitForChild("PlayerGui")
+
+-- Ana Pencere
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 500, 0, 380)
+MainFrame.Position = UDim2.new(0.5, -250, 0.5, -190)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Parent = ScreenGui
+CreateCorner(MainFrame, UDim.new(0, 10))
+CreateStroke(MainFrame, Color3.fromRGB(0, 170, 255), 2)
+
+-- Başlık Çubuğu
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, 36)
+TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+CreateCorner(TitleBar, UDim.new(0, 10))
+
+local TitleText = Instance.new("TextLabel")
+TitleText.Size = UDim2.new(1, -100, 1, 0)
+TitleText.Position = UDim2.new(0, 15, 0, 0)
+TitleText.BackgroundTransparency = 1
+TitleText.Text = "KILASIK'S ULTIMATE v7.1"
+TitleText.TextColor3 = Color3.fromRGB(0, 200, 255)
+TitleText.Font = Enum.Font.GothamBold
+TitleText.TextSize = 16
+TitleText.TextXAlignment = Enum.TextXAlignment.Left
+TitleText.Parent = TitleBar
+
+-- Minimize Butonu
+local MinBtn = Instance.new("TextButton")
+MinBtn.Size = UDim2.new(0, 30, 0, 30)
+MinBtn.Position = UDim2.new(1, -65, 0, 3)
+MinBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+MinBtn.Text = "_"
+MinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinBtn.Font = Enum.Font.GothamBold
+MinBtn.TextSize = 18
+MinBtn.Parent = TitleBar
+CreateCorner(MinBtn, UDim.new(0, 6))
+
+-- Kapat Butonu
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -33, 0, 3)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 14
+CloseBtn.Parent = TitleBar
+CreateCorner(CloseBtn, UDim.new(0, 6))
+
+-- Sol Menü
+local SideMenu = Instance.new("Frame")
+SideMenu.Name = "SideMenu"
+SideMenu.Size = UDim2.new(0, 120, 1, -36)
+SideMenu.Position = UDim2.new(0, 0, 0, 36)
+SideMenu.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+SideMenu.BorderSizePixel = 0
+SideMenu.Parent = MainFrame
+
+local MenuLayout = Instance.new("UIListLayout")
+MenuLayout.Padding = UDim.new(0, 4)
+MenuLayout.Parent = SideMenu
+
+-- İçerik Alanı
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Name = "ContentFrame"
+ContentFrame.Size = UDim2.new(1, -120, 1, -36)
+ContentFrame.Position = UDim2.new(0, 120, 0, 36)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.Parent = MainFrame
+
+-- ==================== SEKME YÖNETİMİ ====================
+local Tabs = {}
+local TabButtons = {}
+local CurrentTab = nil
+
+local function CreateTab(name)
+    local TabBtn = Instance.new("TextButton")
+    TabBtn.Size = UDim2.new(1, -8, 0, 36)
+    TabBtn.Position = UDim2.new(0, 4, 0, 0)
+    TabBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    TabBtn.Text = "  " .. name
+    TabBtn.TextColor3 = Color3.fromRGB(180, 180, 190)
+    TabBtn.Font = Enum.Font.GothamBold
+    TabBtn.TextSize = 12
+    TabBtn.TextXAlignment = Enum.TextXAlignment.Left
+    TabBtn.Parent = SideMenu
+    CreateCorner(TabBtn)
+    
+    local TabFrame = Instance.new("ScrollingFrame")
+    TabFrame.Name = name .. "Tab"
+    TabFrame.Size = UDim2.new(1, -10, 1, -10)
+    TabFrame.Position = UDim2.new(0, 5, 0, 5)
+    TabFrame.BackgroundTransparency = 1
+    TabFrame.ScrollBarThickness = 4
+    TabFrame.ScrollBarImageColor3 = Color3.fromRGB(0, 170, 255)
+    TabFrame.Visible = false
+    TabFrame.Parent = ContentFrame
+    
+    local Grid = Instance.new("UIGridLayout")
+    Grid.CellSize = UDim2.new(0, 170, 0, 45)
+    Grid.CellPadding = UDim2.new(0, 8, 0, 8)
+    Grid.Parent = TabFrame
+    
+    Tabs[name] = TabFrame
+    TabButtons[name] = TabBtn
+    
+    TabBtn.MouseButton1Click:Connect(function()
+        if CurrentTab then
+            Tabs[CurrentTab].Visible = false
+            TabButtons[CurrentTab].BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+            TabButtons[CurrentTab].TextColor3 = Color3.fromRGB(180, 180, 190)
+        end
+        CurrentTab = name
+        TabFrame.Visible = true
+        TabBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
+        TabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    end)
+    
+    return TabFrame
+end
+
+local CloneTab = CreateTab("CLONE")
+local ESPTab = CreateTab("ESP")
+local CameraTab = CreateTab("KAMERA")
+local CharTab = CreateTab("KARAKTER")
+local MiscTab = CreateTab("AYARLAR")
+
+-- ==================== BUTON / KUTU OLUŞTURUCULAR ====================
+local function CreateFeatureButton(parent, text, color, callback)
+    local Btn = Instance.new("TextButton")
+    Btn.Size = UDim2.new(1, 0, 1, 0)
+    Btn.BackgroundColor3 = color or Color3.fromRGB(50, 50, 60)
+    Btn.Text = text
+    Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Btn.Font = Enum.Font.GothamBold
+    Btn.TextSize = 12
+    Btn.Parent = parent
+    CreateCorner(Btn)
+    CreateStroke(Btn, Color3.fromRGB(0, 0, 0), 1)
+    
+    local active = false
+    Btn.MouseButton1Click:Connect(function()
+        active = not active
+        if active then
+            Tween(Btn, {BackgroundColor3 = Color3.fromRGB(0, 200, 100)}, 0.2)
+        else
+            Tween(Btn, {BackgroundColor3 = color or Color3.fromRGB(50, 50, 60)}, 0.2)
+        end
+        callback(active)
+    end)
+    return Btn
+end
+
+local function CreateValueBox(parent, placeholder, default)
+    local Box = Instance.new("TextBox")
+    Box.Size = UDim2.new(1, 0, 1, 0)
+    Box.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    Box.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Box.Font = Enum.Font.GothamSemibold
+    Box.TextSize = 13
+    Box.Text = tostring(default)
+    Box.PlaceholderText = placeholder
+    Box.Parent = parent
+    CreateCorner(Box)
+    CreateStroke(Box, Color3.fromRGB(0, 170, 255), 1)
+    return Box
+end
+
+-- ==================== CLONE SEKMESİ ====================
+CreateFeatureButton(CloneTab, "GODMODE CLONE", Color3.fromRGB(0, 120, 215), function(active)
+    if active then
+        if not isModeOn then ToggleMode() end
+    else
+        if isModeOn then ToggleMode() end
+    end
+end)
+
+CreateFeatureButton(CloneTab, "OTO MOD", Color3.fromRGB(180, 180, 185), function(active)
+    autoActive = active
+    if active then
+        task.spawn(function()
+            while autoActive do
+                local onTime = tonumber(TimeBox.Text) or 5
+                if not isModeOn then ToggleMode() end
+                local passedTime = 0
+                while passedTime < onTime and autoActive do
+                    task.wait(0.1)
+                    passedTime = passedTime + 0.1
+                end
+                if not autoActive then break end
+                if isModeOn then ToggleMode() end
+                task.wait(0.5)
+            end
+        end)
+    end
+end)
+
+CreateFeatureButton(CloneTab, "TELEPORT AÇIK", Color3.fromRGB(200, 180, 50), function(active)
+    teleportOnClose = active
+end)
+
+CreateFeatureButton(CloneTab, "GERÇEK VÜCUT GİZLE", Color3.fromRGB(150, 50, 200), function(active)
+    hideRealBody = active
+    if isModeOn and RealChar and RealChar:FindFirstChild("HumanoidRootPart") then
+        if hideRealBody then
+            RealChar.HumanoidRootPart.CFrame = originalCF + Vector3.new(0, 5000, 0)
+        else
+            RealChar.HumanoidRootPart.CFrame = originalCF
+        end
+    end
+end)
+
+local TimeContainer = Instance.new("Frame")
+TimeContainer.Parent = CloneTab
+TimeBox = CreateValueBox(TimeContainer, "Süre (sn)", 5)
+
+-- ==================== KARAKTER SEKMESİ ====================
+CreateFeatureButton(CharTab, "UÇUŞ (FLY)", Color3.fromRGB(255, 100, 100), function(active)
+    flyActive = active
+end)
+
+CreateFeatureButton(CharTab, "VİEW LOCK", Color3.fromRGB(255, 150, 50), function(active)
+    shiftLockActive = active
+end)
+
+CreateFeatureButton(CharTab, "DUVARDAN GEÇ (NOCLIP)", Color3.fromRGB(50, 200, 200), function(active)
+    noclipActive = active
+end)
+
+CreateFeatureButton(CharTab, "TANRI MODU (GOD)", Color3.fromRGB(255, 50, 50), function(active)
+    godModeActive = active
+    if active then
+        local conn = RunService.Heartbeat:Connect(function()
+            local char = Player.Character
+            if char and char:FindFirstChild("Humanoid") then
+                char.Humanoid.MaxHealth = math.huge
+                char.Humanoid.Health = math.huge
+            end
+            if FakeChar and FakeChar:FindFirstChild("Humanoid") then
+                FakeChar.Humanoid.MaxHealth = math.huge
+                FakeChar.Humanoid.Health = math.huge
+            end
+        end)
+        table.insert(MiscConns, conn)
+    else
+        for i = #MiscConns, 1, -1 do
+            SafeDisconnect(MiscConns[i])
+            table.remove(MiscConns, i)
+        end
+    end
+end)
+
+local SpeedContainer = Instance.new("Frame")
+SpeedContainer.Parent = CharTab
+SpeedBox = CreateValueBox(SpeedContainer, "Hız", 16)
+
+local JumpContainer = Instance.new("Frame")
+JumpContainer.Parent = CharTab
+JumpBox = CreateValueBox(JumpContainer, "Zıplama", 50)
+
+-- ==================== KAMERA SEKMESİ ====================
+CreateFeatureButton(CameraTab, "FULLBRIGHT", Color3.fromRGB(255, 255, 100), function(active)
+    fullbrightActive = active
+    if active then
+        Lighting.Brightness = 10
+        Lighting.Ambient = Color3.new(1, 1, 1)
+        Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+        Lighting.ClockTime = 14
+        Lighting.FogEnd = 100000
+    else
+        Lighting.Brightness = 2
+        Lighting.Ambient = Color3.fromRGB(127, 127, 127)
+        Lighting.OutdoorAmbient = Color3.fromRGB(127, 127, 127)
+        Lighting.ClockTime = 12
+    end
+end)
+
+CreateFeatureButton(CameraTab, "FREECAM", Color3.fromRGB(100, 100, 255), function(active)
+    freecamActive = active
+    if active then
+        local camCF = Camera.CFrame
+        local freecamPos = camCF.Position
+        local freecamRot = Vector2.new(camCF.Rotation.X, camCF.Rotation.Y)
+        local speed = 2
+        
+        local conn = RunService.RenderStepped:Connect(function()
+            if not freecamActive then return end
+            local delta = UserInputService:GetMouseDelta()
+            freecamRot = freecamRot - Vector2.new(delta.Y, delta.X) * 0.3
+            
+            local move = Vector3.new(0, 0, 0)
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + Vector3.new(0, 0, -1) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move + Vector3.new(0, 0, 1) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move + Vector3.new(-1, 0, 0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + Vector3.new(1, 0, 0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0, 1, 0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then move = move + Vector3.new(0, -1, 0) end
+            
+            local rotCF = CFrame.Angles(0, math.rad(-freecamRot.Y), 0) * CFrame.Angles(math.rad(-freecamRot.X), 0, 0)
+            freecamPos = freecamPos + (rotCF * move * speed)
+            Camera.CFrame = rotCF + freecamPos
+            Camera.CameraType = Enum.CameraType.Scriptable
+        end)
+        table.insert(MiscConns, conn)
+    else
+        for i = #MiscConns, 1, -1 do
+            SafeDisconnect(MiscConns[i])
+            table.remove(MiscConns, i)
+        end
+        Camera.CameraType = Enum.CameraType.Custom
+        if isModeOn and FakeChar and FakeChar:FindFirstChild("Humanoid") then
+            Camera.CameraSubject = FakeChar.Humanoid
+        elseif Player.Character and Player.Character:FindFirstChild("Humanoid") then
+            Camera.CameraSubject = Player.Character.Humanoid
+        end
+    end
+end)
+
+CreateFeatureButton(CameraTab, "ZOOM EXTENDER", Color3.fromRGB(100, 255, 100), function(active)
+    zoomExtenderActive = active
+    if active then
+        Player.CameraMaxZoomDistance = 10000
+        Player.CameraMinZoomDistance = 0.5
+    else
+        Player.CameraMaxZoomDistance = 128
+        Player.CameraMinZoomDistance = 0.5
+    end
+end)
+
+-- ==================== ESP SEKMESİ ====================
+CreateFeatureButton(ESPTab, "ESP AÇ/KAPA", Color3.fromRGB(255, 50, 150), function(active)
+    espActive = active
+    if active then
+        local function CreateESP(plr)
+            if plr == Player then return end
+            if ESPObjects[plr] then return end
+            
+            local espFolder = Instance.new("Folder")
+            espFolder.Name = plr.Name .. "_ESP"
+            espFolder.Parent = ScreenGui
+            ESPObjects[plr] = espFolder
+            
+            local box = Instance.new("Frame")
+            box.Name = "Box"
+            box.Size = UDim2.new(0, 80, 0, 100)
+            box.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+            box.BackgroundTransparency = 0.8
+            box.BorderSizePixel = 0
+            box.Parent = espFolder
+            
+            local nameTag = Instance.new("TextLabel")
+            nameTag.Name = "Name"
+            nameTag.Size = UDim2.new(0, 100, 0, 20)
+            nameTag.BackgroundTransparency = 1
+            nameTag.TextColor3 = Color3.fromRGB(255, 255, 255)
+            nameTag.Font = Enum.Font.GothamBold
+            nameTag.TextSize = 12
+            nameTag.Parent = espFolder
+            
+            local distTag = Instance.new("TextLabel")
+            distTag.Name = "Dist"
+            distTag.Size = UDim2.new(0, 100, 0, 18)
+            distTag.BackgroundTransparency = 1
+            distTag.TextColor3 = Color3.fromRGB(0, 255, 255)
+            distTag.Font = Enum.Font.GothamBold
+            distTag.TextSize = 11
+            distTag.Parent = espFolder
+            
+            local conn = RunService.RenderStepped:Connect(function()
+                if not espActive or not ESPObjects[plr] then return end
+                local char = plr.Character
+                if not char then
+                    box.Visible = false
+                    nameTag.Visible = false
+                    distTag.Visible = false
+                    return
+                end
+                local root = char:FindFirstChild("HumanoidRootPart")
+                local hum = char:FindFirstChild("Humanoid")
+                if not root or not hum then
+                    box.Visible = false
+                    nameTag.Visible = false
+                    distTag.Visible = false
+                    return
+                end
+                
+                local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
+                if not onScreen then
+                    box.Visible = false
+                    nameTag.Visible = false
+                    distTag.Visible = false
+                    return
+                end
+                
+                box.Visible = true
+                nameTag.Visible = true
+                distTag.Visible = true
+                
+                box.Position = UDim2.new(0, pos.X - 40, 0, pos.Y - 50)
+                nameTag.Position = UDim2.new(0, pos.X - 50, 0, pos.Y - 70)
+                distTag.Position = UDim2.new(0, pos.X - 50, 0, pos.Y + 55)
+                
+                nameTag.Text = plr.Name .. " [" .. math.floor(hum.Health) .. "/" .. math.floor(hum.MaxHealth) .. "]"
+                local dist = (Camera.CFrame.Position - root.Position).Magnitude
+                distTag.Text = string.format("%.1f m", dist)
+            end)
+            table.insert(ESPConns, conn)
+        end
+        
+        for _, plr in pairs(Players:GetPlayers()) do
+            CreateESP(plr)
+        end
+        local addedConn = Players.PlayerAdded:Connect(CreateESP)
+        table.insert(ESPConns, addedConn)
+    else
+        for _, conn in pairs(ESPConns) do SafeDisconnect(conn) end
+        table.clear(ESPConns)
+        for _, obj in pairs(ESPObjects) do obj:Destroy() end
+        table.clear(ESPObjects)
+    end
+end)
+
+-- ==================== AYARLAR SEKMESİ ====================
+CreateFeatureButton(MiscTab, "TÜMÜNÜ TEMİZLE", Color3.fromRGB(200, 50, 50), function(active)
+    -- Clone kapat
+    if isModeOn then ToggleMode() end
+    autoActive = false
+    flyActive = false
+    noclipActive = false
+    shiftLockActive = false
+    
+    -- Fullbright sıfırla
+    if fullbrightActive then
+        fullbrightActive = false
+        Lighting.Brightness = 2
+        Lighting.Ambient = Color3.fromRGB(127, 127, 127)
+        Lighting.OutdoorAmbient = Color3.fromRGB(127, 127, 127)
+        Lighting.ClockTime = 12
+    end
+    
+    -- Freecam kapat
+    if freecamActive then
+        freecamActive = false
+        ClearTable(MiscConns)
+        Camera.CameraType = Enum.CameraType.Custom
+        if Player.Character and Player.Character:FindFirstChild("Humanoid") then
+            Camera.CameraSubject = Player.Character.Humanoid
+        end
+    end
+    
+    -- Zoom sıfırla
+    if zoomExtenderActive then
+        zoomExtenderActive = false
+        Player.CameraMaxZoomDistance = 128
+    end
+    
+    -- God Mode kapat
+    if godModeActive then
+        godModeActive = false
+        ClearTable(MiscConns)
+    end
+    
+    -- ESP kapat
+    if espActive then
+        espActive = false
+        for _, conn in pairs(ESPConns) do SafeDisconnect(conn) end
+        table.clear(ESPConns)
+        for _, obj in pairs(ESPObjects) do obj:Destroy() end
+        table.clear(ESPObjects)
+    end
+end)
+
+-- ==================== SÜRÜKLEME SİSTEMİ ====================
+local dragging = false
+local dragStart = nil
+local startPos = nil
+
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+    end
+end)
+
+TitleBar.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+TitleBar.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+-- ==================== KÜÇÜLTME / BÜYÜTME ====================
+local minimizedBar = Instance.new("Frame")
+minimizedBar.Name = "MinimizedBar"
+minimizedBar.Size = UDim2.new(0, 200, 0, 36)
+minimizedBar.Position = UDim2.new(0, 20, 0, 20)
+minimizedBar.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+minimizedBar.BorderSizePixel = 0
+minimizedBar.Visible = false
+minimizedBar.Active = true
+minimizedBar.Parent = ScreenGui
+CreateCorner(minimizedBar, UDim.new(0, 8))
+CreateStroke(minimizedBar, Color3.fromRGB(0, 170, 255), 2)
+
+local miniText = Instance.new("TextLabel")
+miniText.Size = UDim2.new(1, -40, 1, 0)
+miniText.Position = UDim2.new(0, 10, 0, 0)
+miniText.BackgroundTransparency = 1
+miniText.Text = "KILASIK'S ULTIMATE"
+miniText.TextColor3 = Color3.fromRGB(0, 200, 255)
+miniText.Font = Enum.Font.GothamBold
+miniText.TextSize = 14
+miniText.TextXAlignment = Enum.TextXAlignment.Left
+miniText.Parent = minimizedBar
+
+local maxiBtn = Instance.new("TextButton")
+maxiBtn.Size = UDim2.new(0, 30, 0, 30)
+maxiBtn.Position = UDim2.new(1, -33, 0, 3)
+maxiBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+maxiBtn.Text = "□"
+maxiBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+maxiBtn.Font = Enum.Font.GothamBold
+maxiBtn.TextSize = 14
+maxiBtn.Parent = minimizedBar
+CreateCorner(maxiBtn, UDim.new(0, 6))
+
+-- Minimize sürükleme
+local miniDragging = false
+local miniDragStart = nil
+local miniStartPos = nil
+
+minimizedBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        miniDragging = true
+        miniDragStart = input.Position
+        miniStartPos = minimizedBar.Position
+    end
+end)
+
+minimizedBar.InputChanged:Connect(function(input)
+    if miniDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - miniDragStart
+        minimizedBar.Position = UDim2.new(miniStartPos.X.Scale, miniStartPos.X.Offset + delta.X, miniStartPos.Y.Scale, miniStartPos.Y.Offset + delta.Y)
+    end
+end)
+
+minimizedBar.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        miniDragging = false
+    end
+end)
+
+MinBtn.MouseButton1Click:Connect(function()
+    isMinimized = true
+    MainFrame.Visible = false
+    minimizedBar.Visible = true
+end)
+
+maxiBtn.MouseButton1Click:Connect(function()
+    isMinimized = false
+    minimizedBar.Visible = false
+    MainFrame.Visible = true
+end)
+
+CloseBtn.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+
+-- ==================== TOGGLE BUTONU (INSERT) ====================
+local ToggleKeyBtn = Instance.new("TextButton")
+ToggleKeyBtn.Size = UDim2.new(0, 50, 0, 50)
+ToggleKeyBtn.Position = UDim2.new(0, 20, 0.5, 200)
+ToggleKeyBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+ToggleKeyBtn.Text = "UI"
+ToggleKeyBtn.TextColor3 = Color3.new(0, 0, 0)
+ToggleKeyBtn.Font = Enum.Font.GothamBold
+ToggleKeyBtn.TextSize = 16
+ToggleKeyBtn.Parent = ScreenGui
+CreateCorner(ToggleKeyBtn, UDim.new(1, 0))
+CreateStroke(ToggleKeyBtn, Color3.new(0, 0, 0), 3)
+
+ToggleKeyBtn.MouseButton1Click:Connect(function()
+    uiVisible = not uiVisible
+    if isMinimized then
+        minimizedBar.Visible = uiVisible
+    else
+        MainFrame.Visible = uiVisible
+    end
+    ToggleKeyBtn.BackgroundColor3 = uiVisible and Color3.fromRGB(0, 170, 255) or Color3.fromRGB(100, 100, 100)
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.Insert then
+        uiVisible = not uiVisible
+        if isMinimized then
+            minimizedBar.Visible = uiVisible
+        else
+            MainFrame.Visible = uiVisible
+        end
+        ToggleKeyBtn.BackgroundColor3 = uiVisible and Color3.fromRGB(0, 170, 255) or Color3.fromRGB(100, 100, 100)
+    end
+end)
+
+-- ==================== GODMODE CLONE SİSTEMİ ====================
+function ToggleMode()
+    if isModeOn then
+        isModeOn = false
+        ClearTable(CloneConns)
+        StopAll()
+        
+        if FakeChar then
+            local lastCF = FakeChar:GetPrimaryPartCFrame()
+            FakeChar:Destroy()
+            FakeChar = nil
+            
+            if RealChar and RealChar:FindFirstChild("HumanoidRootPart") then
+                RealChar.HumanoidRootPart.Anchored = false
+                if teleportOnClose then
+                    RealChar.HumanoidRootPart.CFrame = lastCF
+                elseif originalCF then
+                    RealChar.HumanoidRootPart.CFrame = originalCF
+                end
+                Player.Character = RealChar
+                Camera.CameraSubject = RealChar.Humanoid
+            end
+        end
+    else
+        RealChar = Player.Character
+        if not RealChar or not RealChar:FindFirstChild("HumanoidRootPart") then return end
+        
+        isModeOn = true
+        originalCF = RealChar.HumanoidRootPart.CFrame
+        RealChar.Archivable = true
+        FakeChar = RealChar:Clone()
+        FakeChar.Name = "God_Clone"
+        FakeChar.Parent = workspace
+        
+        if hideRealBody then
+            RealChar.HumanoidRootPart.CFrame = originalCF + Vector3.new(0, 5000, 0)
+        end
+        RealChar.HumanoidRootPart.Anchored = true
+        
+        local fakeHum = FakeChar:FindFirstChild("Humanoid")
+        local fakeRoot = FakeChar:FindFirstChild("HumanoidRootPart")
+        
+        for _, v in pairs(FakeChar:GetDescendants()) do
+            if v:IsA("LocalScript") or v:IsA("Script") then v:Destroy() end
+            if v:IsA("BasePart") then
+                v.Anchored = false
+                v.CanCollide = (v.Name == "HumanoidRootPart")
+                if v.Name == "HumanoidRootPart" then v.Transparency = 1 end
+            end
+        end
+        
+        AnimTracks.Idle = LoadAnim(fakeHum, OfficialIDs.Idle)
+        AnimTracks.Walk = LoadAnim(fakeHum, OfficialIDs.Walk)
+        AnimTracks.Run = LoadAnim(fakeHum, OfficialIDs.Run)
+        AnimTracks.Jump = LoadAnim(fakeHum, OfficialIDs.Jump)
+        AnimTracks.Fall = LoadAnim(fakeHum, OfficialIDs.Fall)
+        
+        Camera.CameraSubject = fakeHum
+        if AnimTracks.Idle then AnimTracks.Idle:Play() end
+        
+        table.insert(CloneConns, fakeHum.StateChanged:Connect(function(oldState, newState)
+            if flyActive then return end
+            if newState == Enum.HumanoidStateType.Jumping then
+                StopAll()
+                if AnimTracks.Jump then AnimTracks.Jump:Play() end
+            elseif newState == Enum.HumanoidStateType.Freefall then
+                StopAll()
+                if AnimTracks.Fall then AnimTracks.Fall:Play() end
+            elseif newState == Enum.HumanoidStateType.Landed then
+                StopAll()
+                if AnimTracks.Idle then AnimTracks.Idle:Play() end
+            end
+        end))
+        
+        table.insert(CloneConns, RunService.RenderStepped:Connect(function()
+            if not isModeOn or not fakeHum or not fakeRoot then return end
+            
+            if noclipActive then
+                for _, v in pairs(FakeChar:GetDescendants()) do
+                    if v:IsA("BasePart") then v.CanCollide = false end
+                end
+            end
+            
+            if shiftLockActive then
+                local camLook = Camera.CFrame.LookVector
+                local lookAtPos = fakeRoot.Position + Vector3.new(camLook.X, 0, camLook.Z)
+                fakeRoot.CFrame = CFrame.lookAt(fakeRoot.Position, lookAtPos)
+            end
+            
+            local currentSpeed = tonumber(SpeedBox.Text) or 16
+            fakeHum.WalkSpeed = currentSpeed
+            
+            local inputVector = Vector3.new(0, 0, 0)
+            if Controls then
+                inputVector = Controls:GetMoveVector()
+            else
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then inputVector = inputVector + Vector3.new(0, 0, -1) end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then inputVector = inputVector + Vector3.new(0, 0, 1) end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then inputVector = inputVector + Vector3.new(-1, 0, 0) end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then inputVector = inputVector + Vector3.new(1, 0, 0) end
+            end
+            
+            local camCF = Camera.CFrame
+            
+            if flyActive then
+                fakeHum.PlatformStand = true
+                local move3D = (camCF.RightVector * inputVector.X) + (camCF.LookVector * -inputVector.Z)
+                local bv = fakeRoot:FindFirstChild("FlyVelocity")
+                if not bv then
+                    bv = Instance.new("BodyVelocity")
+                    bv.Name = "FlyVelocity"
+                    bv.MaxForce = Vector3.new(100000, 100000, 100000)
+                    bv.Parent = fakeRoot
+                end
+                
+                if move3D.Magnitude > 0 then
+                    bv.Velocity = move3D.Unit * currentSpeed
+                    if AnimTracks.Fall and not AnimTracks.Fall.IsPlaying then
+                        StopAll()
+                        AnimTracks.Fall:Play(0.1)
+                    end
+                else
+                    bv.Velocity = Vector3.new(0, 0, 0)
+                    if AnimTracks.Idle and not AnimTracks.Idle.IsPlaying then
+                        StopAll()
+                        AnimTracks.Idle:Play(0.1)
+                    end
+                end
+            else
+                fakeHum.PlatformStand = false
+                local bv = fakeRoot:FindFirstChild("FlyVelocity")
+                if bv then bv:Destroy() end
+                
+                local finalDir = (camCF.RightVector * inputVector.X) + (camCF.LookVector * -inputVector.Z)
+                finalDir = Vector3.new(finalDir.X, 0, finalDir.Z)
+                
+                local currentState = fakeHum:GetState()
+                local isGrounded = (currentState == Enum.HumanoidStateType.Running or currentState == Enum.HumanoidStateType.RunningNoPhysics)
+                
+                if finalDir.Magnitude > 0 then
+                    fakeHum:Move(finalDir.Unit, false)
+                    if isGrounded and AnimTracks.Run and not AnimTracks.Run.IsPlaying then
+                        StopAll()
+                        AnimTracks.Run:Play(0.1)
+                    end
+                else
+                    fakeHum:Move(Vector3.new(0, 0, 0), false)
+                    if isGrounded and AnimTracks.Idle and not AnimTracks.Idle.IsPlaying then
+                        StopAll()
+                        AnimTracks.Idle:Play(0.1)
+                    end
+                end
+            end
+        end))
+        
+        table.insert(CloneConns, UserInputService.JumpRequest:Connect(function()
+            if isModeOn and fakeHum and not flyActive and fakeHum:GetState() ~= Enum.HumanoidStateType.Freefall then
+                local currentJump = tonumber(JumpBox.Text) or 50
+                fakeHum.UseJumpPower = true
+                fakeHum.JumpPower = currentJump
+                fakeHum.Jump = true
+            end
+        end))
+    end
+end
+
+-- ==================== BAŞLANGIÇ AYARLARI ====================
+CurrentTab = "CLONE"
+Tabs["CLONE"].Visible = true
+TabButtons["CLONE"].BackgroundColor3 = Color3.fromRGB(0, 120, 200)
+TabButtons["CLONE"].TextColor3 = Color3.fromRGB(255, 255, 255)
+
+print("KILASIK'S ULTIMATE v7.1 FIXED yüklendi! Insert tuşu veya UI butonu ile aç/kapa.")
