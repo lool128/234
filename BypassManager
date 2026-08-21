@@ -1,4 +1,4 @@
--- This script is brought to you by AzureDLL
+-- loadstring(game:HttpGet(""))()
 -- Use this script responsibly
 -- Works best on older Roblox games due to legacy functions
 -- Script works as of 4/1/2025
