@@ -73,7 +73,7 @@ task.wait(7 + HouseCount)
 QueueTeleport(("local Body = %q\n%s"):format(Body, Body))
 
 local ServerHopSource = game:HttpGet(
-    "https://raw.githubusercontent.com/Cesare0328/my-scripts/refs/heads/main/CachedServerhop.lua"
+    "https://raw.githubusercontent.com/lool128/234/refs/heads/main/SERVER%20HOP"
 )
 
 local ServerHop, CompileError = loadstring(ServerHopSource)
