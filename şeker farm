@@ -21,6 +21,142 @@ local Houses = workspace:WaitForChild("Houses")
 local HouseList = Houses:GetChildren()
 local HouseCount = #HouseList
 
+-- ============ AYARLAR (sunucu degisince de korunur) ============
+local ConfigFile = "HouseFarmConfig.json"
+local Config = { Farm = true, Stay = false, NoRender = false }
+
+pcall(function()
+    if isfile and isfile(ConfigFile) then
+        local Data = game:GetService("HttpService"):JSONDecode(readfile(ConfigFile))
+        if type(Data) == "table" then
+            if type(Data.Farm) == "boolean" then Config.Farm = Data.Farm end
+            if type(Data.Stay) == "boolean" then Config.Stay = Data.Stay end
+            if type(Data.NoRender) == "boolean" then Config.NoRender = Data.NoRender end
+        end
+    end
+end)
+
+local function SaveConfig()
+    pcall(function()
+        writefile(ConfigFile, game:GetService("HttpService"):JSONEncode(Config))
+    end)
+end
+
+-- ============ ARAYUZ ============
+local GuiParent = (gethui and gethui()) or game:GetService("CoreGui")
+
+pcall(function()
+    local Old = GuiParent:FindFirstChild("HouseFarmGui")
+    if Old then Old:Destroy() end
+end)
+
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "HouseFarmGui"
+Gui.ResetOnSpawn = false
+Gui.Parent = GuiParent
+
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0, 190, 0, 158)
+Main.AnchorPoint = Vector2.new(0.5, 0.5)
+Main.Position = UDim2.new(0.5, 0, 0.5, 0)
+Main.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.Draggable = true
+Main.Parent = Gui
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 26)
+Title.BackgroundTransparency = 1
+Title.Text = "Şeker Farmı"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 14
+Title.Parent = Main
+
+local function MakeButton(Y)
+    local Button = Instance.new("TextButton")
+    Button.Size = UDim2.new(1, -20, 0, 34)
+    Button.Position = UDim2.new(0, 10, 0, Y)
+    Button.BorderSizePixel = 0
+    Button.Font = Enum.Font.GothamBold
+    Button.TextSize = 13
+    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Button.AutoButtonColor = true
+    Button.Parent = Main
+    Instance.new("UICorner", Button).CornerRadius = UDim.new(0, 6)
+    return Button
+end
+
+local FarmButton = MakeButton(30)
+local StayButton = MakeButton(72)
+local RenderButton = MakeButton(114)
+
+local function ApplyRender()
+    pcall(function()
+        game:GetService("RunService"):Set3dRenderingEnabled(not Config.NoRender)
+    end)
+end
+
+local On = Color3.fromRGB(46, 160, 67)
+local Off = Color3.fromRGB(170, 55, 55)
+
+local function Refresh()
+    FarmButton.Text = "Farm: " .. (Config.Farm and "ACIK" or "KAPALI")
+    FarmButton.BackgroundColor3 = Config.Farm and On or Off
+    StayButton.Text = "Bu serverda kal: " .. (Config.Stay and "ACIK" or "KAPALI")
+    StayButton.BackgroundColor3 = Config.Stay and On or Off
+    RenderButton.Text = "3D cizimi kapat: " .. (Config.NoRender and "ACIK" or "KAPALI")
+    RenderButton.BackgroundColor3 = Config.NoRender and On or Off
+end
+
+FarmButton.MouseButton1Click:Connect(function()
+    Config.Farm = not Config.Farm
+    SaveConfig()
+    Refresh()
+
+    -- Farm kapatilinca karakteri resetle
+    if not Config.Farm then
+        pcall(function()
+            local Character = Player.Character
+            local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
+            if Humanoid then
+                Humanoid.Health = 0
+            end
+        end)
+    end
+end)
+
+StayButton.MouseButton1Click:Connect(function()
+    Config.Stay = not Config.Stay
+    SaveConfig()
+    Refresh()
+end)
+
+RenderButton.MouseButton1Click:Connect(function()
+    Config.NoRender = not Config.NoRender
+    SaveConfig()
+    ApplyRender()
+    Refresh()
+end)
+
+Refresh()
+ApplyRender()
+
+-- ============ ANTI AFK (acik kaynak, standart VirtualUser yontemi) ============
+do
+    local VirtualUser = game:GetService("VirtualUser")
+
+    Player.Idled:Connect(function()
+        pcall(function()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+        end)
+    end)
+end
+
+-- ============ FARM ============
 local function GetRoot()
     while true do
         local Character = Player.Character
@@ -34,51 +170,199 @@ local function GetRoot()
     end
 end
 
-for _, House in ipairs(HouseList) do
-    local Door = House:FindFirstChild("Door")
-    local TouchPart = Door and Door:FindFirstChild("DoorInnerTouch")
+local function CollectHouses()
+    -- Her turda ev listesini yeniden al
+    HouseList = Houses:GetChildren()
+    HouseCount = #HouseList
+    local Fired, Skipped = 0, 0
 
-    if not TouchPart or not TouchPart:IsA("BasePart") then
-        continue
-    end
-
-    if not TouchPart:FindFirstChild("TouchInterest") then
-        continue
-    end
-
-    local Character, Hrp = GetRoot()
-
-    local Success, ErrorMessage = pcall(function()
-        if not TouchPart:IsDescendantOf(workspace) then
+    for _, House in ipairs(HouseList) do
+        if not Config.Farm then
             return
         end
 
-        firetouchinterest(Hrp, TouchPart, 0)
-        task.wait(0.2)
+        local Door = House:FindFirstChild("Door")
+        local TouchPart = Door and Door:FindFirstChild("DoorInnerTouch")
 
-        if Player.Character == Character
-            and Hrp:IsDescendantOf(workspace)
-            and TouchPart:IsDescendantOf(workspace) then
-            firetouchinterest(Hrp, TouchPart, 1)
+        if not TouchPart or not TouchPart:IsA("BasePart") then
+            Skipped += 1
+            continue
         end
-    end)
 
-    if not Success then
-        warn(("[House Collector] %s: %s"):format(House.Name, tostring(ErrorMessage)))
+        if not TouchPart:FindFirstChild("TouchInterest") then
+            Skipped += 1
+            continue
+        end
+
+        Fired += 1
+        local Character, Hrp = GetRoot()
+
+        local Success, ErrorMessage = pcall(function()
+            if not TouchPart:IsDescendantOf(workspace) then
+                return
+            end
+
+            firetouchinterest(Hrp, TouchPart, 0)
+            task.wait(0.2)
+
+            if Player.Character == Character
+                and Hrp:IsDescendantOf(workspace)
+                and TouchPart:IsDescendantOf(workspace) then
+                firetouchinterest(Hrp, TouchPart, 1)
+            end
+        end)
+
+        if not Success then
+            warn(("[House Collector] %s: %s"):format(House.Name, tostring(ErrorMessage)))
+        end
+    end
+
+    print(("[House Collector] Tur bitti: %d ev tetiklendi, %d ev atlandi (TouchInterest yok)"):format(Fired, Skipped))
+end
+
+-- Sunucu atlama kodu (orijinal, degistirilmedi) bir fonksiyonun icinde
+local function ServerHopRun()
+local API, HttpService, TeleportService, CoreGui = nil, game:GetService("HttpService"), game:GetService("TeleportService"), game:GetService("CoreGui");
+local RemoveErrorPrompts = true --prevents error messages from popping up.
+local IterationSpeed = 0.25 --speed in which next server is picked for teleport (the higher it is the slower the teleports but more likely to work).
+local ExcludefullServers = true --slightly beneficial if the game is high ccu or mid ccu, if not, set to false.
+local SaveTeleportAttempts = false --saves every teleports that are attempted in jobid to "Attempts.txt" file
+local API = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?limit=100"
+
+local function EncodeToFile(JSONString)
+local success, JSONData = pcall(function()
+    return HttpService:JSONDecode(JSONString)
+end)
+if success and JSONData.data then
+    JSONData.gameId = game.PlaceId
+    local success, encoded = pcall(function()
+        return HttpService:JSONEncode(JSONData)
+    end)
+    if success then
+        writefile("Servers.JSON", encoded)
+    else
+        warn("Failed to encode JSON string.")
+        return nil
+    end
+else
+    warn("Failed to decode JSONData.")
+    return nil
+end
+return JSONData
+end
+
+local function NextCursor(ep)
+    return game:HttpGet(API .. "&excludeFullGames=" .. tostring(ExcludefullServers) .. ((ep and "&cursor=" .. ep) or ""))
+end
+
+local function StartTeleport()
+    local JSONData = EncodeToFile(readfile("Servers.JSON"))
+    if not JSONData then
+        writefile("Servers.JSON", game:HttpGet(API))
+        StartTeleport()
+    end
+    for i = 0, 99 do
+        if #JSONData.data <= 1 then
+            EncodeToFile(NextCursor(JSONData.nextPageCursor))
+            TeleportService:Teleport(game.PlaceId, game.Players.LocalPlayer)
+        end
+        if JSONData.data[i] then
+            local JobId = JSONData.data[i].id
+            table.remove(JSONData.data, i)
+            local sucess, encoded = pcall(function()
+                return HttpService:JSONEncode(JSONData)
+            end)
+            writefile("Servers.JSON", encoded)
+            if SaveTeleportAttempts then
+                appendfile("Attempts.txt", JobId .. "\n")
+            end
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, JobId, game.Players.LocalPlayer)
+            task.wait(IterationSpeed)
+        end
     end
 end
 
-task.wait(7 + HouseCount)
+local function SetMainPage()
+    local MainPage = game:HttpGet(API)
+    writefile("Servers.JSON", MainPage)
+    StartTeleport()
+end
 
-QueueTeleport(("local Body = %q\n%s"):format(Body, Body))
+if RemoveErrorPrompts then CoreGui:WaitForChild("RobloxGui"):WaitForChild("Modules"):WaitForChild("ErrorPrompt"):Destroy() CoreGui.RobloxPromptGui:Destroy() end
 
-local ServerHopSource = game:HttpGet(
-    "https://raw.githubusercontent.com/lool128/234/refs/heads/main/SERVER%20HOP"
-)
+if isfile("Servers.JSON") then
+    local success, JSONData = pcall(function()
+        return HttpService:JSONDecode(readfile("Servers.JSON"))
+    end)
+    if success and JSONData then
+        if JSONData.gameId ~= game.PlaceId then
+            warn("Game mismatch from cache, remaking cache for --> " .. game.PlaceId)
+            SetMainPage()
+        end
+        if JSONData.data and #JSONData.data >= 1 then
+            StartTeleport()
+        else
+            if success and JSONData.nextPageCursor then
+                EncodeToFile(NextCursor(JSONData.nextPageCursor))
+                StartTeleport()
+            else
+                SetMainPage() --no more pages left, start over
+            end
+        end
+    else
+        SetMainPage()
+    end
+else
+    SetMainPage()
+end
+end
 
-local ServerHop, CompileError = loadstring(ServerHopSource)
-assert(ServerHop, CompileError)
-ServerHop()
+-- Butonlara tepki veren bekleme: ayar degisirse false doner
+local function WaitSeconds(Seconds)
+    local FarmAtStart, StayAtStart = Config.Farm, Config.Stay
+    local Elapsed = 0
+    while Elapsed < Seconds do
+        task.wait(0.25)
+        Elapsed += 0.25
+        if Config.Farm ~= FarmAtStart then
+            return false
+        end
+        if Config.Stay ~= StayAtStart then
+            -- "Kal" kapatildiysa beklemeyi bitir ve hemen atla, acildiysa atlama
+            return not Config.Stay
+        end
+    end
+    return true
+end
+
+local Queued = false
+
+task.spawn(function()
+    while true do
+        if not Config.Farm then
+            task.wait(0.25)
+            continue
+        end
+
+        CollectHouses()
+
+        if not Config.Farm then
+            continue
+        end
+
+        local Finished = WaitSeconds(7 + HouseCount)
+
+        if Finished and Config.Farm and not Config.Stay then
+            if not Queued then
+                Queued = true
+                QueueTeleport(("local Body = %q\n%s"):format(Body, Body))
+            end
+
+            ServerHopRun()
+            task.wait(10)
+        end
+    end
+end)
 ]==]
 
 local Run, CompileError = loadstring(
