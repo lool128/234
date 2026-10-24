@@ -1,4 +1,5 @@
 local Body = [==[
+
 if not game:IsLoaded() then
     game.Loaded:Wait()
 end
@@ -10,20 +11,23 @@ local QueueTeleport = queue_on_teleport
 assert(type(QueueTeleport) == "function", "Teleport queue is unavailable.")
 assert(type(firetouchinterest) == "function", "Touch simulation is unavailable.")
 
-local Players = game:GetService("Players")
+local Players           = game:GetService("Players")
+local TeleportService   = game:GetService("TeleportService")
+local UserInputService  = game:GetService("UserInputService")
 
 repeat
     task.wait()
 until Players.LocalPlayer
 
-local Player = Players.LocalPlayer
-local Houses = workspace:WaitForChild("Houses")
-local HouseList = Houses:GetChildren()
-local HouseCount = #HouseList
+local LocalPlayer = Players.LocalPlayer
+local Player      = LocalPlayer
 
--- ============ AYARLAR (sunucu degisince de korunur) ============
+
+-- ════════════════════════════════════════════════════
+-- AYARLAR (sunucu değişince de korunur)
+-- ════════════════════════════════════════════════════
 local ConfigFile = "HouseFarmConfig.json"
-local Config = { Farm = true, Stay = false, NoRender = false }
+local Config = { Farm = true, Stay = false, NoRender = false, Goodl = "off" }
 
 pcall(function()
     if isfile and isfile(ConfigFile) then
@@ -32,6 +36,7 @@ pcall(function()
             if type(Data.Farm) == "boolean" then Config.Farm = Data.Farm end
             if type(Data.Stay) == "boolean" then Config.Stay = Data.Stay end
             if type(Data.NoRender) == "boolean" then Config.NoRender = Data.NoRender end
+            if Data.Goodl == "gold" or Data.Goodl == "block" or Data.Goodl == "off" then Config.Goodl = Data.Goodl end
         end
     end
 end)
@@ -42,56 +47,500 @@ local function SaveConfig()
     end)
 end
 
--- ============ ARAYUZ ============
+-- Scripti bir sonraki ışınlanmada tekrar çalıştırmak için sıraya alır (sunucu başına 1 kez)
+local Queued = false
+local function QueueSelf()
+    if not Queued then
+        Queued = true
+        pcall(QueueTeleport, ("local Body = %q\n%s"):format(Body, Body))
+    end
+end
+
 local GuiParent = (gethui and gethui()) or game:GetService("CoreGui")
 
 pcall(function()
-    local Old = GuiParent:FindFirstChild("HouseFarmGui")
-    if Old then Old:Destroy() end
+    for _, Name in ipairs({ "LunaBotV41", "HouseFarmGui" }) do
+        local Old = GuiParent:FindFirstChild(Name)
+        if Old then Old:Destroy() end
+    end
 end)
 
-local Gui = Instance.new("ScreenGui")
-Gui.Name = "HouseFarmGui"
-Gui.ResetOnSpawn = false
-Gui.Parent = GuiParent
+-- ════════════════════════════════════════════════════
+-- RENK PALETİ
+-- ════════════════════════════════════════════════════
+local C = {
+    BG        = Color3.fromRGB(8,   8,  18),
+    BG2       = Color3.fromRGB(14,  14, 30),
+    BG3       = Color3.fromRGB(20,  20, 45),
+    BG4       = Color3.fromRGB(26,  26, 55),
+    TITLE_BAR = Color3.fromRGB(16,  16, 38),
+    PURPLE    = Color3.fromRGB(167, 139, 250),
+    PURPLE_DK = Color3.fromRGB(76,  29, 149),
+    PURPLE_LT = Color3.fromRGB(200, 180, 255),
+    GREEN     = Color3.fromRGB(34,  197, 94),
+    GREEN_DK  = Color3.fromRGB(10,  60,  25),
+    RED       = Color3.fromRGB(220, 80,  80),
+    RED_DK    = Color3.fromRGB(40,  12,  12),
+    ORANGE    = Color3.fromRGB(251, 146, 60),
+    TEXT      = Color3.fromRGB(210, 210, 240),
+    MUTED     = Color3.fromRGB(90,  90,  130),
+    WHITE     = Color3.fromRGB(255, 255, 255),
+    GOLD      = Color3.fromRGB(250, 200, 80),
+    BLUE      = Color3.fromRGB(96,  165, 250),
+}
 
-local Main = Instance.new("Frame")
-Main.Size = UDim2.new(0, 190, 0, 158)
-Main.AnchorPoint = Vector2.new(0.5, 0.5)
-Main.Position = UDim2.new(0.5, 0, 0.5, 0)
-Main.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-Main.BorderSizePixel = 0
-Main.Active = true
-Main.Draggable = true
-Main.Parent = Gui
-Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
-
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 26)
-Title.BackgroundTransparency = 1
-Title.Text = "Şeker Farmı"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.Font = Enum.Font.GothamBold
-Title.TextSize = 14
-Title.Parent = Main
-
-local function MakeButton(Y)
-    local Button = Instance.new("TextButton")
-    Button.Size = UDim2.new(1, -20, 0, 34)
-    Button.Position = UDim2.new(0, 10, 0, Y)
-    Button.BorderSizePixel = 0
-    Button.Font = Enum.Font.GothamBold
-    Button.TextSize = 13
-    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
-    Button.AutoButtonColor = true
-    Button.Parent = Main
-    Instance.new("UICorner", Button).CornerRadius = UDim.new(0, 6)
-    return Button
+-- ════════════════════════════════════════════════════
+-- YARDIMCI FONKSİYONLAR
+-- ════════════════════════════════════════════════════
+local function corner(parent, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, radius or 8)
+    c.Parent = parent
 end
 
-local FarmButton = MakeButton(30)
-local StayButton = MakeButton(72)
-local RenderButton = MakeButton(114)
+local function stroke(parent, color, thickness)
+    local s = Instance.new("UIStroke")
+    s.Color     = color or Color3.fromRGB(50, 50, 80)
+    s.Thickness = thickness or 1
+    s.Parent    = parent
+end
+
+local function padding(parent, px, py)
+    local p  = Instance.new("UIPadding")
+    local ux = UDim.new(0, px)
+    local uy = UDim.new(0, py or px)
+    p.PaddingLeft   = ux
+    p.PaddingRight  = ux
+    p.PaddingTop    = uy
+    p.PaddingBottom = uy
+    p.Parent = parent
+end
+
+local function label(parent, props)
+    local l = Instance.new("TextLabel")
+    l.BackgroundTransparency = 1
+    l.Font           = props.font  or Enum.Font.Gotham
+    l.TextSize       = props.size  or 12
+    l.TextColor3     = props.color or C.TEXT
+    l.Text           = props.text  or ""
+    l.TextXAlignment = props.align or Enum.TextXAlignment.Left
+    l.TextTruncate   = props.wrap and Enum.TextTruncate.None or Enum.TextTruncate.AtEnd
+    l.TextWrapped    = props.wrap  or false
+    l.Size           = props.sz    or UDim2.new(1, 0, 0, 16)
+    l.Position       = props.pos   or UDim2.new(0, 0, 0, 0)
+    l.Parent         = parent
+    return l
+end
+
+local function button(parent, props)
+    local b = Instance.new("TextButton")
+    b.BackgroundColor3 = props.bg    or C.BG3
+    b.BorderSizePixel  = 0
+    b.Text             = props.text  or ""
+    b.TextColor3       = props.color or C.PURPLE
+    b.Font             = props.font  or Enum.Font.GothamBold
+    b.TextSize         = props.size  or 12
+    b.AutoButtonColor  = false
+    b.Size             = props.sz    or UDim2.new(1, 0, 0, 32)
+    b.Position         = props.pos   or UDim2.new(0, 0, 0, 0)
+    b.Parent           = parent
+    corner(b, props.radius or 8)
+    local hoverBg  = props.hoverBg or C.PURPLE_DK
+    local normalBg = props.bg      or C.BG3
+    b.MouseEnter:Connect(function() b.BackgroundColor3 = hoverBg  end)
+    b.MouseLeave:Connect(function() b.BackgroundColor3 = normalBg end)
+    return b
+end
+
+local function badge(parent, txt, bg, fg, xOff, yOff)
+    local f = Instance.new("Frame")
+    f.Size             = UDim2.new(0, 56, 0, 18)
+    f.Position         = UDim2.new(1, xOff or -64, 0, yOff or 6)
+    f.BackgroundColor3 = bg or C.BG3
+    f.BorderSizePixel  = 0
+    f.Parent           = parent
+    corner(f, 6)
+    local l = Instance.new("TextLabel")
+    l.Size             = UDim2.new(1, 0, 1, 0)
+    l.BackgroundTransparency = 1
+    l.Text             = txt
+    l.TextColor3       = fg or C.TEXT
+    l.Font             = Enum.Font.GothamSemibold
+    l.TextSize         = 9
+    l.Parent           = f
+    return f, l
+end
+
+-- ════════════════════════════════════════════════════
+-- ANA GUI
+-- ════════════════════════════════════════════════════
+local sg = Instance.new("ScreenGui")
+sg.Name           = "LunaBotV41"
+sg.ResetOnSpawn   = false
+sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+sg.Parent         = GuiParent
+
+local panel = Instance.new("Frame")
+panel.Name             = "Panel"
+panel.Size             = UDim2.new(0, 340, 0, 380)
+panel.Position         = UDim2.new(0.5, -170, 0.5, -190)
+panel.BackgroundColor3 = C.BG
+panel.BorderSizePixel  = 0
+panel.ClipsDescendants = true
+panel.Parent           = sg
+corner(panel, 14)
+stroke(panel, Color3.fromRGB(40, 30, 80), 1.5)
+
+-- ── BAŞLIK ÇUBUĞU ──────────────────────────────────
+local titleBar = Instance.new("Frame")
+titleBar.Size             = UDim2.new(1, 0, 0, 44)
+titleBar.BackgroundColor3 = C.TITLE_BAR
+titleBar.BorderSizePixel  = 0
+titleBar.Parent           = panel
+corner(titleBar, 14)
+
+-- Alt kenarı düzeltme şeridi
+local titleFix = Instance.new("Frame")
+titleFix.Size             = UDim2.new(1, 0, 0, 14)
+titleFix.Position         = UDim2.new(0, 0, 1, -14)
+titleFix.BackgroundColor3 = C.TITLE_BAR
+titleFix.BorderSizePixel  = 0
+titleFix.Parent           = titleBar
+
+label(titleBar, {
+    text  = "                                        🌙x🍬x💰",
+    font  = Enum.Font.GothamBold,
+    size  = 13,
+    color = C.PURPLE,
+    sz    = UDim2.new(1, -90, 1, 0),
+    pos   = UDim2.new(0, 14, 0, 0),
+})
+
+-- Kapat (Sağ Shift ile tekrar açılır)
+local closeBtn = button(titleBar, {
+    text    = "✕",
+    bg      = Color3.fromRGB(50, 15, 15),
+    color   = C.RED,
+    hoverBg = Color3.fromRGB(90, 20, 20),
+    sz      = UDim2.new(0, 28, 0, 28),
+    pos     = UDim2.new(1, -36, 0.5, -14),
+    size    = 13,
+})
+closeBtn.MouseButton1Click:Connect(function()
+    panel.Visible = not panel.Visible
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.RightShift then
+        panel.Visible = not panel.Visible
+    end
+end)
+
+-- Küçült
+local minimizeBtn = button(titleBar, {
+    text    = "—",
+    bg      = C.BG3,
+    color   = C.MUTED,
+    hoverBg = C.BG2,
+    sz      = UDim2.new(0, 28, 0, 28),
+    pos     = UDim2.new(1, -68, 0.5, -14),
+    size    = 13,
+})
+local minimized = false
+minimizeBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    panel.Size       = minimized and UDim2.new(0, 340, 0, 44) or UDim2.new(0, 340, 0, 380)
+    minimizeBtn.Text = minimized and "□" or "—"
+end)
+
+-- Sürükleme
+local drag, dragStart, startPos
+titleBar.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then
+        drag = true; dragStart = i.Position; startPos = panel.Position
+    end
+end)
+titleBar.InputChanged:Connect(function(i)
+    if drag and i.UserInputType == Enum.UserInputType.MouseMovement then
+        local d = i.Position - dragStart
+        panel.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
+                                    startPos.Y.Scale, startPos.Y.Offset + d.Y)
+    end
+end)
+titleBar.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end
+end)
+
+-- ── SEKME ÇUBUĞU ────────────────────────────────────
+local tabBar = Instance.new("Frame")
+tabBar.Size             = UDim2.new(1, -12, 0, 32)
+tabBar.Position         = UDim2.new(0, 6, 0, 48)
+tabBar.BackgroundColor3 = C.BG2
+tabBar.BorderSizePixel  = 0
+tabBar.Parent           = panel
+corner(tabBar, 8)
+
+local tabLayout = Instance.new("UIListLayout")
+tabLayout.FillDirection     = Enum.FillDirection.Horizontal
+tabLayout.Padding           = UDim.new(0, 3)
+tabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+tabLayout.Parent            = tabBar
+padding(tabBar, 4)
+
+local TAB_NAMES = { "Eventler", "Şeker", "GOODL" }
+local TAB_ICONS = { "🎯", "🍬", "💰" }
+local tabBtns   = {}
+local tabPages  = {}
+
+local pageContainer = Instance.new("Frame")
+pageContainer.Size                   = UDim2.new(1, -12, 1, -92)
+pageContainer.Position               = UDim2.new(0, 6, 0, 84)
+pageContainer.BackgroundTransparency = 1
+pageContainer.ClipsDescendants       = true
+pageContainer.Parent                 = panel
+
+local function switchTab(idx)
+    for i, btn in ipairs(tabBtns) do
+        if i == idx then
+            btn.BackgroundTransparency = 0
+            btn.BackgroundColor3       = C.PURPLE_DK
+            btn.TextColor3             = C.WHITE
+        else
+            btn.BackgroundTransparency = 1
+            btn.TextColor3             = C.MUTED
+        end
+    end
+    for i, page in ipairs(tabPages) do
+        page.Visible = (i == idx)
+    end
+end
+
+for i, name in ipairs(TAB_NAMES) do
+    local tb = Instance.new("TextButton")
+    tb.Size                   = UDim2.new(1/3, -3, 1, 0)
+    tb.BackgroundColor3       = C.PURPLE_DK
+    tb.BackgroundTransparency = 1
+    tb.BorderSizePixel        = 0
+    tb.Text                   = TAB_ICONS[i] .. " " .. name
+    tb.TextColor3             = C.MUTED
+    tb.Font                   = Enum.Font.GothamSemibold
+    tb.TextSize               = 11
+    tb.AutoButtonColor        = false
+    tb.Parent                 = tabBar
+    corner(tb, 6)
+    tb.MouseButton1Click:Connect(function() switchTab(i) end)
+    tabBtns[i] = tb
+
+    local page = Instance.new("Frame")
+    page.Size                   = UDim2.new(1, 0, 1, 0)
+    page.BackgroundTransparency = 1
+    page.Visible                = (i == 2)
+    page.Parent                 = pageContainer
+    tabPages[i] = page
+end
+
+-- Durum çubuğu
+local statusLbl = label(panel, {
+    text  = "",
+    color = C.GREEN,
+    size  = 11,
+    sz    = UDim2.new(1, -12, 0, 18),
+    pos   = UDim2.new(0, 12, 1, -22),
+})
+
+local function setStatus(msg, isError)
+    statusLbl.Text       = msg
+    statusLbl.TextColor3 = isError and C.RED or C.GREEN
+    task.delay(5, function()
+        if statusLbl.Text == msg then statusLbl.Text = "" end
+    end)
+end
+
+-- ════════════════════════════════════════════════════
+-- TAB 1: EVENTLER
+-- ════════════════════════════════════════════════════
+local eventPage = tabPages[1]
+
+local eventScroll = Instance.new("ScrollingFrame")
+eventScroll.Size                = UDim2.new(1, 0, 1, 0)
+eventScroll.BackgroundTransparency = 1
+eventScroll.BorderSizePixel     = 0
+eventScroll.ScrollBarThickness  = 3
+eventScroll.ScrollBarImageColor3 = C.PURPLE_DK
+eventScroll.CanvasSize          = UDim2.new(0, 0, 0, 0)
+eventScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+eventScroll.Parent              = eventPage
+
+local eventLayout = Instance.new("UIListLayout")
+eventLayout.Padding = UDim.new(0, 6)
+eventLayout.Parent  = eventScroll
+padding(eventScroll, 3)
+
+local EVENT_LIST = {
+    {
+        isim    = "🔐 The Secret Place",
+        placeId = 1930665568,
+        renk    = Color3.fromRGB(40, 20, 70),
+        aciklama = "Gizli etkinlik alanı",
+    },
+    {
+        isim    = "🥚 Paskalya Event",
+        placeId = 1930863474,
+        renk    = Color3.fromRGB(60, 45, 10),
+        aciklama = "Paskalya yumurtası avı",
+    },
+    {
+        isim    = "❄ Winter Place",
+        placeId = 1930866268,
+        renk    = Color3.fromRGB(10, 40, 70),
+        aciklama = "Kış temalı özel alan",
+    },
+}
+
+-- Event kartları + oyuncu sayısı badge'i
+local eventBadgeLabels = {}  -- güncelleme için sakla
+
+for _, ev in ipairs(EVENT_LIST) do
+    local kart = Instance.new("TextButton")
+    kart.Size             = UDim2.new(1, -6, 0, 68)
+    kart.BackgroundColor3 = C.BG2
+    kart.BorderSizePixel  = 0
+    kart.Text             = ""
+    kart.AutoButtonColor  = false
+    kart.Parent           = eventScroll
+    corner(kart, 10)
+    stroke(kart, Color3.fromRGB(30, 25, 60))
+
+    -- Sol renkli şerit
+    local serit = Instance.new("Frame")
+    serit.Size             = UDim2.new(0, 3, 1, 0)
+    serit.BackgroundColor3 = ev.renk
+    serit.BorderSizePixel  = 0
+    serit.Parent           = kart
+    corner(serit, 3)
+
+    label(kart, {
+        text  = ev.isim,
+        font  = Enum.Font.GothamBold,
+        size  = 13,
+        color = C.TEXT,
+        sz    = UDim2.new(1, -110, 0, 20),
+        pos   = UDim2.new(0, 14, 0, 8),
+    })
+    label(kart, {
+        text  = ev.aciklama,
+        size  = 10,
+        color = C.MUTED,
+        sz    = UDim2.new(1, -110, 0, 14),
+        pos   = UDim2.new(0, 14, 0, 28),
+    })
+    label(kart, {
+        text  = "Place ID: " .. ev.placeId,
+        size  = 9,
+        color = Color3.fromRGB(70, 70, 100),
+        sz    = UDim2.new(1, -110, 0, 12),
+        pos   = UDim2.new(0, 14, 0, 44),
+    })
+
+    -- Oyuncu sayısı badge
+    local _, badgeLbl = badge(kart, "👥 ...", Color3.fromRGB(15, 30, 15), C.GREEN, -84, 6)
+    table.insert(eventBadgeLabels, { lbl = badgeLbl, placeId = ev.placeId })
+
+    local gitBtn = button(kart, {
+        text    = "→ Git",
+        bg      = ev.renk,
+        color   = C.PURPLE_LT,
+        hoverBg = C.PURPLE_DK,
+        sz      = UDim2.new(0, 70, 0, 30),
+        pos     = UDim2.new(1, -78, 0.5, -15),
+        size    = 11,
+        radius  = 8,
+    })
+
+    local capEv = ev
+    gitBtn.MouseButton1Click:Connect(function()
+        setStatus("🚀 " .. capEv.isim .. " → gidiliyor...")
+        task.wait(0.3)
+        QueueSelf()
+        local ok, err = pcall(function()
+            TeleportService:Teleport(capEv.placeId, LocalPlayer)
+        end)
+        if not ok then setStatus("❌ Teleport hatası: " .. tostring(err), true) end
+    end)
+
+    kart.MouseEnter:Connect(function() kart.BackgroundColor3 = C.BG3 end)
+    kart.MouseLeave:Connect(function() kart.BackgroundColor3 = C.BG2 end)
+end
+
+-- Event oyuncu sayılarını arka planda güncelle
+task.spawn(function()
+    while true do
+        for _, entry in ipairs(eventBadgeLabels) do
+            local ok, count = pcall(function()
+                return Players:GetPlayerCountFromPlaceId(entry.placeId)
+            end)
+            if ok and count then
+                entry.lbl.Text = "👥 " .. tostring(count)
+            else
+                entry.lbl.Text = "👥 ?"
+            end
+            task.wait(1)
+        end
+        task.wait(30)  -- 30sn'de bir güncelle
+    end
+end)
+
+-- ════════════════════════════════════════════════════
+-- TAB 5: ŞEKER FARMI
+-- ════════════════════════════════════════════════════
+local farmPage = tabPages[2]
+
+local farmInfo = Instance.new("Frame")
+farmInfo.Size             = UDim2.new(1, -6, 0, 64)
+farmInfo.Position         = UDim2.new(0, 3, 0, 0)
+farmInfo.BackgroundColor3 = C.BG2
+farmInfo.BorderSizePixel  = 0
+farmInfo.Parent           = farmPage
+corner(farmInfo, 10)
+stroke(farmInfo, Color3.fromRGB(60, 50, 10))
+
+label(farmInfo, {
+    text  = "🍬 Şeker Farmı",
+    font  = Enum.Font.GothamBold,
+    size  = 14,
+    color = C.GOLD,
+    sz    = UDim2.new(1, -20, 0, 20),
+    pos   = UDim2.new(0, 12, 0, 8),
+})
+
+local farmDurumLbl = label(farmInfo, {
+    text  = "Durum: başlatılıyor...",
+    size  = 11,
+    color = C.MUTED,
+    sz    = UDim2.new(1, -20, 0, 16),
+    pos   = UDim2.new(0, 12, 0, 36),
+})
+
+local function SetFarmStatus(Text)
+    farmDurumLbl.Text = "Durum: " .. Text
+end
+
+local function toggleButton(parent, y)
+    local b = Instance.new("TextButton")
+    b.Size             = UDim2.new(1, -6, 0, 40)
+    b.Position         = UDim2.new(0, 3, 0, y)
+    b.BorderSizePixel  = 0
+    b.Font             = Enum.Font.GothamBold
+    b.TextSize         = 12
+    b.AutoButtonColor  = true
+    b.Parent           = parent
+    corner(b, 10)
+    return b
+end
+
+local FarmButton   = toggleButton(farmPage, 74)
+local StayButton   = toggleButton(farmPage, 120)
+local RenderButton = toggleButton(farmPage, 166)
 
 local function ApplyRender()
     pcall(function()
@@ -99,16 +548,16 @@ local function ApplyRender()
     end)
 end
 
-local On = Color3.fromRGB(46, 160, 67)
-local Off = Color3.fromRGB(170, 55, 55)
+local function SetToggle(Button, Text, IsOn)
+    Button.Text             = Text .. ": " .. (IsOn and "AÇIK" or "KAPALI")
+    Button.BackgroundColor3 = IsOn and C.GREEN_DK or C.RED_DK
+    Button.TextColor3       = IsOn and C.GREEN or C.RED
+end
 
 local function Refresh()
-    FarmButton.Text = "Farm: " .. (Config.Farm and "ACIK" or "KAPALI")
-    FarmButton.BackgroundColor3 = Config.Farm and On or Off
-    StayButton.Text = "Bu serverda kal: " .. (Config.Stay and "ACIK" or "KAPALI")
-    StayButton.BackgroundColor3 = Config.Stay and On or Off
-    RenderButton.Text = "3D cizimi kapat: " .. (Config.NoRender and "ACIK" or "KAPALI")
-    RenderButton.BackgroundColor3 = Config.NoRender and On or Off
+    SetToggle(FarmButton,   "🍬 Farm", Config.Farm)
+    SetToggle(StayButton,   "📌 Bu serverda kal", Config.Stay)
+    SetToggle(RenderButton, "3D çizimi kapat", Config.NoRender)
 end
 
 FarmButton.MouseButton1Click:Connect(function()
@@ -116,7 +565,7 @@ FarmButton.MouseButton1Click:Connect(function()
     SaveConfig()
     Refresh()
 
-    -- Farm kapatilinca karakteri resetle
+    -- Farm kapatılınca karakteri resetle
     if not Config.Farm then
         pcall(function()
             local Character = Player.Character
@@ -141,10 +590,273 @@ RenderButton.MouseButton1Click:Connect(function()
     Refresh()
 end)
 
+label(farmPage, {
+    text  = "Kal açıkken sunucu atlamaz, aynı yerde sürekli toplar. Farm kapatılınca karakter resetlenir. Paneli Sağ Shift ile gizleyebilirsin.",
+    size  = 10,
+    color = C.MUTED,
+    sz    = UDim2.new(1, -6, 0, 56),
+    pos   = UDim2.new(0, 3, 0, 216),
+    wrap  = true,
+})
+
 Refresh()
 ApplyRender()
 
--- ============ ANTI AFK (acik kaynak, standart VirtualUser yontemi) ============
+-- ════════════════════════════════════════════════════
+-- TAB 3: GOODL AUTOFARM
+-- ════════════════════════════════════════════════════
+local goodlPage = tabPages[3]
+
+local Goodl = {
+    Mode            = nil,   -- nil, "gold" veya "block"
+    Token           = 0,     -- her başlatma/durdurmada artar, eski döngüleri öldürür
+    Loading         = false,
+    Conn            = nil,
+    Refs            = nil,
+    AutoClaim       = true,
+    ClaimChest      = false,
+    StartStage      = 2,
+    ChestClaimStage = 2,
+    ChestClaimDelay = 1,
+}
+
+local goodlInfo = Instance.new("Frame")
+goodlInfo.Size             = UDim2.new(1, -6, 0, 64)
+goodlInfo.Position         = UDim2.new(0, 3, 0, 0)
+goodlInfo.BackgroundColor3 = C.BG2
+goodlInfo.BorderSizePixel  = 0
+goodlInfo.Parent           = goodlPage
+corner(goodlInfo, 10)
+stroke(goodlInfo, Color3.fromRGB(60, 50, 10))
+
+label(goodlInfo, {
+    text  = "💰 GOODL Autofarm",
+    font  = Enum.Font.GothamBold,
+    size  = 14,
+    color = C.GOLD,
+    sz    = UDim2.new(1, -20, 0, 20),
+    pos   = UDim2.new(0, 12, 0, 8),
+})
+
+local goodlDurumLbl = label(goodlInfo, {
+    text  = "Durum: kapalı",
+    size  = 11,
+    color = C.MUTED,
+    sz    = UDim2.new(1, -20, 0, 16),
+    pos   = UDim2.new(0, 12, 0, 36),
+})
+
+local function SetGoodlStatus(Text, IsError)
+    goodlDurumLbl.Text       = "Durum: " .. Text
+    goodlDurumLbl.TextColor3 = IsError and C.RED or C.MUTED
+end
+
+local GoldOnlyButton  = toggleButton(goodlPage, 74)
+local GoldBlockButton = toggleButton(goodlPage, 120)
+
+local function RefreshGoodl()
+    SetToggle(GoldOnlyButton,  "💰 Sadece Gold", Goodl.Mode == "gold")
+    SetToggle(GoldBlockButton, "🧱 Gold + Blok",  Goodl.Mode == "block")
+end
+RefreshGoodl()
+
+label(goodlPage, {
+    text  = "Aynı butona tekrar basınca kapanır. Mod değiştirmek için diğer butona bas. Sadece BoatStages haritasında çalışır.",
+    size  = 10,
+    color = C.MUTED,
+    sz    = UDim2.new(1, -6, 0, 56),
+    pos   = UDim2.new(0, 3, 0, 170),
+    wrap  = true,
+})
+
+-- Oyun nesnelerini bul (yoksa bu harita GOODL haritası değildir)
+local function WaitPath(Parent, Timeout, ...)
+    local Current = Parent
+    for _, Name in ipairs({ ... }) do
+        Current = Current and Current:WaitForChild(Name, Timeout)
+    end
+    return Current
+end
+
+local function LoadGoodlRefs()
+    if Goodl.Refs then
+        return Goodl.Refs
+    end
+
+    local OtherData = WaitPath(LocalPlayer, 10, "OtherData")
+    local EndData   = OtherData and OtherData:WaitForChild("End", 10)
+    local Stages    = WaitPath(workspace, 10, "BoatStages", "NormalStages")
+    local Chest     = Stages and WaitPath(Stages, 10, "TheEnd", "GoldenChest", "Trigger")
+    local Claim     = WaitPath(workspace, 10, "ClaimRiverResultsGold")
+
+    if not (OtherData and EndData and Stages and Chest and Claim) then
+        return nil
+    end
+
+    Goodl.Refs = {
+        OtherData    = OtherData,
+        EndData      = EndData,
+        Stages       = Stages,
+        ChestTrigger = Chest,
+        ClaimRemote  = Claim,
+    }
+    return Goodl.Refs
+end
+
+local function GoodlAlive(Token, Hum)
+    return Goodl.Token == Token and Hum.Parent ~= nil and Hum.Health > 0
+end
+
+local function GoodlCollectStage(Refs, Token, Char, Hum, StageNumber)
+    local Stage     = Refs.Stages:FindFirstChild("CaveStage" .. StageNumber)
+    local Collect   = Stage and Stage:FindFirstChild("DarknessPart")
+    local StageData = Refs.OtherData:FindFirstChild("Stage" .. (StageNumber - 1))
+
+    if not (Collect and StageData) then
+        return
+    end
+
+    repeat
+        task.wait()
+
+        Char:PivotTo(Collect.CFrame * CFrame.new(0, 0, -20))
+
+        for _, BodyPart in ipairs(Char:GetChildren()) do
+            if BodyPart:IsA("BasePart") then
+                BodyPart.Velocity, BodyPart.RotVelocity = Vector3.zero, Vector3.zero
+            end
+        end
+    until StageData.Value ~= "" or not GoodlAlive(Token, Hum)
+end
+
+local function GoodlTouchChest(Refs, Token, Char, Hum)
+    task.spawn(function()
+        repeat
+            local Old = Refs.ChestTrigger.CFrame
+            Refs.ChestTrigger.CFrame = Char:GetPivot()
+            task.wait()
+            Refs.ChestTrigger.CFrame = Old
+        until Refs.EndData.Value ~= "" or not GoodlAlive(Token, Hum)
+    end)
+end
+
+local function GoodlFarm(Token)
+    local Refs = Goodl.Refs
+    local Char = LocalPlayer.Character
+    if not Refs or not Char then
+        return
+    end
+
+    local Hum = Char:WaitForChild("Humanoid", 10)
+    if not Hum or not Char:WaitForChild("HumanoidRootPart", 10) then
+        return
+    end
+
+    for StageNumber = Goodl.StartStage, 10 do
+        if not GoodlAlive(Token, Hum) then
+            return
+        end
+
+        SetGoodlStatus("stage " .. StageNumber .. " toplanıyor...")
+        GoodlCollectStage(Refs, Token, Char, Hum, StageNumber)
+
+        if not GoodlAlive(Token, Hum) then
+            return
+        end
+
+        if StageNumber ~= Goodl.ChestClaimStage then
+            if Goodl.AutoClaim then
+                Refs.ClaimRemote:FireServer()
+            end
+        elseif Goodl.ClaimChest then
+            task.spawn(function()
+                task.wait(Goodl.ChestClaimDelay)
+                if GoodlAlive(Token, Hum) then
+                    GoodlTouchChest(Refs, Token, Char, Hum)
+                end
+            end)
+        elseif Goodl.AutoClaim then
+            Refs.ClaimRemote:FireServer()
+        end
+    end
+
+    if Goodl.Token == Token then
+        SetGoodlStatus("tur bitti, sıfırlanıyor...")
+        Char:BreakJoints()
+    end
+end
+
+local function StopGoodl()
+    Goodl.Token += 1
+    Goodl.Mode = nil
+
+    if Goodl.Conn then
+        Goodl.Conn:Disconnect()
+        Goodl.Conn = nil
+    end
+
+    Config.Goodl = "off"
+    SaveConfig()
+    RefreshGoodl()
+    SetGoodlStatus("kapalı")
+end
+
+local function StartGoodl(Mode, IsRestore)
+    if Goodl.Loading then
+        return
+    end
+
+    -- aynı butona tekrar basınca kapat
+    if Goodl.Mode == Mode then
+        StopGoodl()
+        return
+    end
+
+    local WasRunning = Goodl.Mode ~= nil
+
+    if not WasRunning then
+        Goodl.Loading = true
+        SetGoodlStatus("oyun verisi aranıyor...")
+        local Refs = LoadGoodlRefs()
+        Goodl.Loading = false
+
+        if not Refs then
+            SetGoodlStatus("bu haritada GOODL verisi bulunamadı", true)
+            if not IsRestore then
+                Config.Goodl = "off"
+                SaveConfig()
+            end
+            RefreshGoodl()
+            return
+        end
+    end
+
+    Goodl.Mode       = Mode
+    Goodl.ClaimChest = (Mode == "block")  -- block: 2. stage'de sandık/blok alınır, gold: sadece gold
+    Config.Goodl     = Mode
+    SaveConfig()
+    RefreshGoodl()
+    SetGoodlStatus(Mode == "gold" and "çalışıyor (sadece gold)" or "çalışıyor (gold + blok)")
+
+    if not WasRunning then
+        Goodl.Token += 1
+        local Token = Goodl.Token
+        Goodl.Conn = LocalPlayer.CharacterAdded:Connect(function()
+            task.spawn(GoodlFarm, Token)
+        end)
+        task.spawn(GoodlFarm, Token)
+    end
+end
+
+GoldOnlyButton.MouseButton1Click:Connect(function()  StartGoodl("gold")  end)
+GoldBlockButton.MouseButton1Click:Connect(function() StartGoodl("block") end)
+
+
+switchTab(2)
+
+-- ════════════════════════════════════════════════════
+-- ANTI AFK (açık kaynak, standart VirtualUser yöntemi)
+-- ════════════════════════════════════════════════════
 do
     local VirtualUser = game:GetService("VirtualUser")
 
@@ -156,7 +868,11 @@ do
     end)
 end
 
--- ============ FARM ============
+-- ════════════════════════════════════════════════════
+-- FARM MANTIĞI
+-- ════════════════════════════════════════════════════
+local Houses, HouseList, HouseCount = nil, {}, 0
+
 local function GetRoot()
     while true do
         local Character = Player.Character
@@ -220,10 +936,12 @@ local function CollectHouses()
     print(("[House Collector] Tur bitti: %d ev tetiklendi, %d ev atlandi (TouchInterest yok)"):format(Fired, Skipped))
 end
 
--- Sunucu atlama kodu (orijinal, degistirilmedi) bir fonksiyonun icinde
+-- Sunucu atlama kodu (orijinal) bir fonksiyonun icinde.
+-- Tek fark: hata pencereleri sadece ilk calismada siliniyor (ikinci calismada WaitForChild sonsuza kadar bekliyordu).
+local PromptsRemoved = false
 local function ServerHopRun()
 local API, HttpService, TeleportService, CoreGui = nil, game:GetService("HttpService"), game:GetService("TeleportService"), game:GetService("CoreGui");
-local RemoveErrorPrompts = true --prevents error messages from popping up.
+local RemoveErrorPrompts = not PromptsRemoved --prevents error messages from popping up.
 local IterationSpeed = 0.25 --speed in which next server is picked for teleport (the higher it is the slower the teleports but more likely to work).
 local ExcludefullServers = true --slightly beneficial if the game is high ccu or mid ccu, if not, set to false.
 local SaveTeleportAttempts = false --saves every teleports that are attempted in jobid to "Attempts.txt" file
@@ -289,6 +1007,7 @@ local function SetMainPage()
 end
 
 if RemoveErrorPrompts then CoreGui:WaitForChild("RobloxGui"):WaitForChild("Modules"):WaitForChild("ErrorPrompt"):Destroy() CoreGui.RobloxPromptGui:Destroy() end
+PromptsRemoved = true
 
 if isfile("Servers.JSON") then
     local success, JSONData = pcall(function()
@@ -335,34 +1054,47 @@ local function WaitSeconds(Seconds)
     return true
 end
 
-local Queued = false
-
 task.spawn(function()
+    -- Houses klasörü yoksa (ör. event haritası) panel yine de çalışır
+    SetFarmStatus("Houses klasörü bekleniyor...")
+    Houses = workspace:WaitForChild("Houses")
+
     while true do
         if not Config.Farm then
+            SetFarmStatus("kapalı")
             task.wait(0.25)
             continue
         end
 
+        SetFarmStatus("toplanıyor...")
         CollectHouses()
 
         if not Config.Farm then
             continue
         end
 
+        SetFarmStatus("bekliyor...")
         local Finished = WaitSeconds(7 + HouseCount)
 
         if Finished and Config.Farm and not Config.Stay then
-            if not Queued then
-                Queued = true
-                QueueTeleport(("local Body = %q\n%s"):format(Body, Body))
-            end
+            SetFarmStatus("sunucu aranıyor...")
+            QueueSelf()
 
-            ServerHopRun()
+            local Ok, HopError = pcall(ServerHopRun)
+            if not Ok then
+                warn("[Server Hop] Hata: " .. tostring(HopError))
+            end
             task.wait(10)
         end
     end
 end)
+
+-- Önceki oturumda GOODL açıksa otomatik devam et
+if Config.Goodl == "gold" or Config.Goodl == "block" then
+    task.spawn(StartGoodl, Config.Goodl, true)
+end
+
+print("🌙 Luna Bot v4.1 + 🍬 Şeker Farmı + 💰 GOODL yüklendi!")
 ]==]
 
 local Run, CompileError = loadstring(
