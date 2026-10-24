@@ -1,4 +1,7 @@
 local Body = [==[
+-- ╔══════════════════════════════════════════════════════════╗
+-- ║               🌙  x 🍬 x 💰                         ║
+-- ╚══════════════════════════════════════════════════════════╝
 
 if not game:IsLoaded() then
     game.Loaded:Wait()
@@ -27,7 +30,7 @@ local Player      = LocalPlayer
 -- AYARLAR (sunucu değişince de korunur)
 -- ════════════════════════════════════════════════════
 local ConfigFile = "HouseFarmConfig.json"
-local Config = { Farm = true, Stay = false, NoRender = false, Goodl = "off" }
+local Config = { Farm = true, Stay = false, NoRender = false, Goodl = "off", AutoRejoin = true }
 
 pcall(function()
     if isfile and isfile(ConfigFile) then
@@ -37,6 +40,7 @@ pcall(function()
             if type(Data.Stay) == "boolean" then Config.Stay = Data.Stay end
             if type(Data.NoRender) == "boolean" then Config.NoRender = Data.NoRender end
             if Data.Goodl == "gold" or Data.Goodl == "block" or Data.Goodl == "off" then Config.Goodl = Data.Goodl end
+            if type(Data.AutoRejoin) == "boolean" then Config.AutoRejoin = Data.AutoRejoin end
         end
     end
 end)
@@ -47,7 +51,7 @@ local function SaveConfig()
     end)
 end
 
--- Scripti bir sonraki ışınlanmada tekrar çalıştırmak için sıraya alır (sunucu başına 1 kez)
+
 local Queued = false
 local function QueueSelf()
     if not Queued then
@@ -68,22 +72,25 @@ end)
 -- ════════════════════════════════════════════════════
 -- RENK PALETİ
 -- ════════════════════════════════════════════════════
+local TweenService = game:GetService("TweenService")
+
 local C = {
     BG        = Color3.fromRGB(8,   8,  18),
-    BG2       = Color3.fromRGB(14,  14, 30),
-    BG3       = Color3.fromRGB(20,  20, 45),
-    BG4       = Color3.fromRGB(26,  26, 55),
-    TITLE_BAR = Color3.fromRGB(16,  16, 38),
+    BG2       = Color3.fromRGB(16,  16, 34),
+    BG3       = Color3.fromRGB(26,  26, 54),
+    BG4       = Color3.fromRGB(34,  34, 70),
+    TITLE_BAR = Color3.fromRGB(20,  16, 44),
     PURPLE    = Color3.fromRGB(167, 139, 250),
-    PURPLE_DK = Color3.fromRGB(76,  29, 149),
-    PURPLE_LT = Color3.fromRGB(200, 180, 255),
-    GREEN     = Color3.fromRGB(34,  197, 94),
-    GREEN_DK  = Color3.fromRGB(10,  60,  25),
-    RED       = Color3.fromRGB(220, 80,  80),
-    RED_DK    = Color3.fromRGB(40,  12,  12),
+    PURPLE_DK = Color3.fromRGB(88,  40, 170),
+    PURPLE_LT = Color3.fromRGB(205, 188, 255),
+    PINK      = Color3.fromRGB(244, 114, 182),
+    GREEN     = Color3.fromRGB(52,  211, 110),
+    GREEN_DK  = Color3.fromRGB(14,  58,  34),
+    RED       = Color3.fromRGB(240, 96,  96),
+    RED_DK    = Color3.fromRGB(44,  14,  18),
     ORANGE    = Color3.fromRGB(251, 146, 60),
-    TEXT      = Color3.fromRGB(210, 210, 240),
-    MUTED     = Color3.fromRGB(90,  90,  130),
+    TEXT      = Color3.fromRGB(220, 220, 245),
+    MUTED     = Color3.fromRGB(112, 112, 160),
     WHITE     = Color3.fromRGB(255, 255, 255),
     GOLD      = Color3.fromRGB(250, 200, 80),
     BLUE      = Color3.fromRGB(96,  165, 250),
@@ -92,17 +99,30 @@ local C = {
 -- ════════════════════════════════════════════════════
 -- YARDIMCI FONKSİYONLAR
 -- ════════════════════════════════════════════════════
+local function tween(obj, props, t)
+    pcall(function()
+        TweenService:Create(
+            obj,
+            TweenInfo.new(t or 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            props
+        ):Play()
+    end)
+end
+
 local function corner(parent, radius)
     local c = Instance.new("UICorner")
     c.CornerRadius = UDim.new(0, radius or 8)
     c.Parent = parent
+    return c
 end
 
 local function stroke(parent, color, thickness)
     local s = Instance.new("UIStroke")
+    s.Name      = "Stroke"
     s.Color     = color or Color3.fromRGB(50, 50, 80)
     s.Thickness = thickness or 1
     s.Parent    = parent
+    return s
 end
 
 local function padding(parent, px, py)
@@ -114,6 +134,16 @@ local function padding(parent, px, py)
     p.PaddingTop    = uy
     p.PaddingBottom = uy
     p.Parent = parent
+    return p
+end
+
+
+local function gradient(parent, c0, c1, rotation)
+    local g = Instance.new("UIGradient")
+    g.Color    = ColorSequence.new(c0, c1)
+    g.Rotation = rotation or 0
+    g.Parent   = parent
+    return g
 end
 
 local function label(parent, props)
@@ -147,33 +177,106 @@ local function button(parent, props)
     corner(b, props.radius or 8)
     local hoverBg  = props.hoverBg or C.PURPLE_DK
     local normalBg = props.bg      or C.BG3
-    b.MouseEnter:Connect(function() b.BackgroundColor3 = hoverBg  end)
-    b.MouseLeave:Connect(function() b.BackgroundColor3 = normalBg end)
+    b.MouseEnter:Connect(function() tween(b, { BackgroundColor3 = hoverBg  }, 0.12) end)
+    b.MouseLeave:Connect(function() tween(b, { BackgroundColor3 = normalBg }, 0.12) end)
     return b
 end
 
-local function badge(parent, txt, bg, fg, xOff, yOff)
+local function badge(parent, txt, bg, fg, xOff, yOff, width)
     local f = Instance.new("Frame")
-    f.Size             = UDim2.new(0, 56, 0, 18)
+    f.Size             = UDim2.new(0, width or 56, 0, 18)
     f.Position         = UDim2.new(1, xOff or -64, 0, yOff or 6)
     f.BackgroundColor3 = bg or C.BG3
     f.BorderSizePixel  = 0
     f.Parent           = parent
-    corner(f, 6)
+    corner(f, 9)
+    stroke(f, (fg or C.TEXT):Lerp(C.BG, 0.7), 1)
     local l = Instance.new("TextLabel")
     l.Size             = UDim2.new(1, 0, 1, 0)
     l.BackgroundTransparency = 1
     l.Text             = txt
     l.TextColor3       = fg or C.TEXT
     l.Font             = Enum.Font.GothamSemibold
-    l.TextSize         = 9
+    l.TextSize         = 10
     l.Parent           = f
     return f, l
+end
+
+
+local function statusColor(Text)
+    if string.find(Text, "hata", 1, true)
+        or string.find(Text, "koptu", 1, true)
+        or string.find(Text, "bulunamadı", 1, true) then
+        return C.RED
+    end
+    if string.find(Text, "kapalı", 1, true) then
+        return C.MUTED
+    end
+    if string.find(Text, "bekl", 1, true) or string.find(Text, "aran", 1, true) then
+        return C.ORANGE
+    end
+    return C.GREEN
+end
+
+
+local function infoCard(parent, title, accent, initialText)
+    local card = Instance.new("Frame")
+    card.Size             = UDim2.new(1, -6, 0, 64)
+    card.Position         = UDim2.new(0, 3, 0, 0)
+    card.BackgroundColor3 = C.WHITE
+    card.BorderSizePixel  = 0
+    card.Parent           = parent
+    corner(card, 10)
+    stroke(card, accent:Lerp(C.BG, 0.7), 1)
+    gradient(card, C.BG3, C.BG2, 0)
+
+    local bar = Instance.new("Frame")
+    bar.Size             = UDim2.new(0, 4, 1, -16)
+    bar.Position         = UDim2.new(0, 8, 0, 8)
+    bar.BackgroundColor3 = accent
+    bar.BorderSizePixel  = 0
+    bar.Parent           = card
+    corner(bar, 2)
+
+    label(card, {
+        text  = title,
+        font  = Enum.Font.GothamBold,
+        size  = 14,
+        color = accent,
+        sz    = UDim2.new(1, -34, 0, 20),
+        pos   = UDim2.new(0, 22, 0, 8),
+    })
+
+    local dot = Instance.new("Frame")
+    dot.Size             = UDim2.new(0, 8, 0, 8)
+    dot.Position         = UDim2.new(0, 22, 0, 41)
+    dot.BackgroundColor3 = C.MUTED
+    dot.BorderSizePixel  = 0
+    dot.Parent           = card
+    corner(dot, 4)
+
+    local lbl = label(card, {
+        text  = "",
+        size  = 11,
+        color = C.TEXT,
+        sz    = UDim2.new(1, -54, 0, 16),
+        pos   = UDim2.new(0, 36, 0, 37),
+    })
+
+    local function set(Text, IsError)
+        lbl.Text = Text
+        tween(dot, { BackgroundColor3 = IsError and C.RED or statusColor(Text) }, 0.2)
+    end
+    set(initialText or "")
+
+    return card, set
 end
 
 -- ════════════════════════════════════════════════════
 -- ANA GUI
 -- ════════════════════════════════════════════════════
+local PANEL_W, PANEL_H = 340, 430
+
 local sg = Instance.new("ScreenGui")
 sg.Name           = "LunaBotV41"
 sg.ResetOnSpawn   = false
@@ -182,57 +285,91 @@ sg.Parent         = GuiParent
 
 local panel = Instance.new("Frame")
 panel.Name             = "Panel"
-panel.Size             = UDim2.new(0, 340, 0, 380)
-panel.Position         = UDim2.new(0.5, -170, 0.5, -190)
-panel.BackgroundColor3 = C.BG
+panel.Size             = UDim2.new(0, PANEL_W, 0, PANEL_H)
+panel.Position         = UDim2.new(0.5, -PANEL_W / 2, 0.5, -PANEL_H / 2)
+panel.BackgroundColor3 = C.WHITE
 panel.BorderSizePixel  = 0
 panel.ClipsDescendants = true
 panel.Parent           = sg
 corner(panel, 14)
-stroke(panel, Color3.fromRGB(40, 30, 80), 1.5)
+gradient(panel, Color3.fromRGB(18, 14, 38), Color3.fromRGB(8, 8, 18), 90)
+gradient(stroke(panel, C.WHITE, 1.5), C.PURPLE_DK, Color3.fromRGB(30, 64, 140), 45)
+
+local panelScale = Instance.new("UIScale")
+panelScale.Parent = panel
+
+local function setPanelVisible(visible)
+    if visible then
+        panelScale.Scale = 0.9
+        panel.Visible = true
+        tween(panelScale, { Scale = 1 }, 0.22)
+    else
+        panel.Visible = false
+    end
+end
 
 -- ── BAŞLIK ÇUBUĞU ──────────────────────────────────
 local titleBar = Instance.new("Frame")
-titleBar.Size             = UDim2.new(1, 0, 0, 44)
-titleBar.BackgroundColor3 = C.TITLE_BAR
+titleBar.Size             = UDim2.new(1, 0, 0, 46)
+titleBar.BackgroundColor3 = C.WHITE
 titleBar.BorderSizePixel  = 0
 titleBar.Parent           = panel
 corner(titleBar, 14)
+gradient(titleBar, Color3.fromRGB(52, 28, 108), Color3.fromRGB(20, 16, 44), 0)
 
--- Alt kenarı düzeltme şeridi
+-- Alt köşeleri düzleştiren şerit
 local titleFix = Instance.new("Frame")
 titleFix.Size             = UDim2.new(1, 0, 0, 14)
 titleFix.Position         = UDim2.new(0, 0, 1, -14)
-titleFix.BackgroundColor3 = C.TITLE_BAR
+titleFix.BackgroundColor3 = C.WHITE
 titleFix.BorderSizePixel  = 0
 titleFix.Parent           = titleBar
+gradient(titleFix, Color3.fromRGB(52, 28, 108), Color3.fromRGB(20, 16, 44), 0)
+
+-- Renkli ince çizgi
+local accentLine = Instance.new("Frame")
+accentLine.Size             = UDim2.new(1, 0, 0, 2)
+accentLine.Position         = UDim2.new(0, 0, 0, 46)
+accentLine.BackgroundColor3 = C.WHITE
+accentLine.BorderSizePixel  = 0
+accentLine.Parent           = panel
+do
+    local g = Instance.new("UIGradient")
+    g.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0,   C.PURPLE),
+        ColorSequenceKeypoint.new(0.5, C.PINK),
+        ColorSequenceKeypoint.new(1,   C.BLUE),
+    })
+    g.Parent = accentLine
+end
 
 label(titleBar, {
-    text  = "                                        🌙x🍬x💰",
+    text  = "                              🌙x🍬x💰",
     font  = Enum.Font.GothamBold,
-    size  = 13,
-    color = C.PURPLE,
+    size  = 17,
+    color = C.WHITE,
     sz    = UDim2.new(1, -90, 1, 0),
     pos   = UDim2.new(0, 14, 0, 0),
 })
 
 -- Kapat (Sağ Shift ile tekrar açılır)
 local closeBtn = button(titleBar, {
-    text    = "✕",
-    bg      = Color3.fromRGB(50, 15, 15),
+    text    = "X",
+    bg      = Color3.fromRGB(64, 20, 28),
     color   = C.RED,
-    hoverBg = Color3.fromRGB(90, 20, 20),
-    sz      = UDim2.new(0, 28, 0, 28),
-    pos     = UDim2.new(1, -36, 0.5, -14),
-    size    = 13,
+    hoverBg = Color3.fromRGB(120, 30, 40),
+    sz      = UDim2.new(0, 26, 0, 26),
+    pos     = UDim2.new(1, -38, 0.5, -13),
+    size    = 12,
+    radius  = 13,
 })
 closeBtn.MouseButton1Click:Connect(function()
-    panel.Visible = not panel.Visible
+    setPanelVisible(not panel.Visible)
 end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if not gameProcessed and input.KeyCode == Enum.KeyCode.RightShift then
-        panel.Visible = not panel.Visible
+        setPanelVisible(not panel.Visible)
     end
 end)
 
@@ -240,45 +377,48 @@ end)
 local minimizeBtn = button(titleBar, {
     text    = "—",
     bg      = C.BG3,
-    color   = C.MUTED,
-    hoverBg = C.BG2,
-    sz      = UDim2.new(0, 28, 0, 28),
-    pos     = UDim2.new(1, -68, 0.5, -14),
-    size    = 13,
+    color   = C.PURPLE_LT,
+    hoverBg = C.BG4,
+    sz      = UDim2.new(0, 26, 0, 26),
+    pos     = UDim2.new(1, -70, 0.5, -13),
+    size    = 12,
+    radius  = 13,
 })
-local minimized = false
-minimizeBtn.MouseButton1Click:Connect(function()
-    minimized = not minimized
-    panel.Size       = minimized and UDim2.new(0, 340, 0, 44) or UDim2.new(0, 340, 0, 380)
-    minimizeBtn.Text = minimized and "□" or "—"
-end)
 
--- Sürükleme
-local drag, dragStart, startPos
+
+-- Sürükleme (fare + dokunmatik)
+local dragging, dragStart, startPos = false, nil, nil
 titleBar.InputBegan:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.MouseButton1 then
-        drag = true; dragStart = i.Position; startPos = panel.Position
+    if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+        dragging  = true
+        dragStart = i.Position
+        startPos  = panel.Position
+        i.Changed:Connect(function()
+            if i.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
     end
 end)
-titleBar.InputChanged:Connect(function(i)
-    if drag and i.UserInputType == Enum.UserInputType.MouseMovement then
+UserInputService.InputChanged:Connect(function(i)
+    if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement
+        or i.UserInputType == Enum.UserInputType.Touch) then
         local d = i.Position - dragStart
         panel.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
                                     startPos.Y.Scale, startPos.Y.Offset + d.Y)
     end
 end)
-titleBar.InputEnded:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end
-end)
 
 -- ── SEKME ÇUBUĞU ────────────────────────────────────
 local tabBar = Instance.new("Frame")
-tabBar.Size             = UDim2.new(1, -12, 0, 32)
-tabBar.Position         = UDim2.new(0, 6, 0, 48)
+tabBar.Size             = UDim2.new(1, -12, 0, 34)
+tabBar.Position         = UDim2.new(0, 6, 0, 56)
 tabBar.BackgroundColor3 = C.BG2
 tabBar.BorderSizePixel  = 0
 tabBar.Parent           = panel
-corner(tabBar, 8)
+corner(tabBar, 9)
+stroke(tabBar, Color3.fromRGB(34, 30, 70), 1)
 
 local tabLayout = Instance.new("UIListLayout")
 tabLayout.FillDirection     = Enum.FillDirection.Horizontal
@@ -291,23 +431,29 @@ local TAB_NAMES = { "Eventler", "Şeker", "GOODL" }
 local TAB_ICONS = { "🎯", "🍬", "💰" }
 local tabBtns   = {}
 local tabPages  = {}
+local ActiveTab = 0
 
 local pageContainer = Instance.new("Frame")
-pageContainer.Size                   = UDim2.new(1, -12, 1, -92)
-pageContainer.Position               = UDim2.new(0, 6, 0, 84)
+pageContainer.Size                   = UDim2.new(1, -12, 1, -128)
+pageContainer.Position               = UDim2.new(0, 6, 0, 96)
 pageContainer.BackgroundTransparency = 1
 pageContainer.ClipsDescendants       = true
 pageContainer.Parent                 = panel
 
 local function switchTab(idx)
+    ActiveTab = idx
     for i, btn in ipairs(tabBtns) do
         if i == idx then
-            btn.BackgroundTransparency = 0
-            btn.BackgroundColor3       = C.PURPLE_DK
-            btn.TextColor3             = C.WHITE
+            tween(btn, {
+                BackgroundTransparency = 0,
+                BackgroundColor3       = C.PURPLE_DK,
+                TextColor3             = C.WHITE,
+            }, 0.18)
         else
-            btn.BackgroundTransparency = 1
-            btn.TextColor3             = C.MUTED
+            tween(btn, {
+                BackgroundTransparency = 1,
+                TextColor3             = C.MUTED,
+            }, 0.18)
         end
     end
     for i, page in ipairs(tabPages) do
@@ -317,18 +463,24 @@ end
 
 for i, name in ipairs(TAB_NAMES) do
     local tb = Instance.new("TextButton")
-    tb.Size                   = UDim2.new(1/3, -3, 1, 0)
+    tb.Size                   = UDim2.new(1 / 3, -3, 1, 0)
     tb.BackgroundColor3       = C.PURPLE_DK
     tb.BackgroundTransparency = 1
     tb.BorderSizePixel        = 0
     tb.Text                   = TAB_ICONS[i] .. " " .. name
     tb.TextColor3             = C.MUTED
-    tb.Font                   = Enum.Font.GothamSemibold
+    tb.Font                   = Enum.Font.GothamBold
     tb.TextSize               = 11
     tb.AutoButtonColor        = false
     tb.Parent                 = tabBar
-    corner(tb, 6)
+    corner(tb, 7)
     tb.MouseButton1Click:Connect(function() switchTab(i) end)
+    tb.MouseEnter:Connect(function()
+        if ActiveTab ~= i then tween(tb, { TextColor3 = C.PURPLE_LT }, 0.12) end
+    end)
+    tb.MouseLeave:Connect(function()
+        if ActiveTab ~= i then tween(tb, { TextColor3 = C.MUTED }, 0.12) end
+    end)
     tabBtns[i] = tb
 
     local page = Instance.new("Frame")
@@ -344,8 +496,8 @@ local statusLbl = label(panel, {
     text  = "",
     color = C.GREEN,
     size  = 11,
-    sz    = UDim2.new(1, -12, 0, 18),
-    pos   = UDim2.new(0, 12, 1, -22),
+    sz    = UDim2.new(1, -24, 0, 18),
+    pos   = UDim2.new(0, 12, 1, -24),
 })
 
 local function setStatus(msg, isError)
@@ -356,23 +508,36 @@ local function setStatus(msg, isError)
     end)
 end
 
+local minimized = false
+minimizeBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    minimizeBtn.Text = minimized and "□" or "—"
+    -- Küçükken alttaki durum yazısı başlığın üstüne biniyordu, o yüzden içerik gizlenir
+    tabBar.Visible        = not minimized
+    pageContainer.Visible = not minimized
+    statusLbl.Visible     = not minimized
+    tween(panel, { Size = UDim2.new(0, PANEL_W, 0, minimized and 48 or PANEL_H) }, 0.2)
+end)
+
+setPanelVisible(true)
+
 -- ════════════════════════════════════════════════════
 -- TAB 1: EVENTLER
 -- ════════════════════════════════════════════════════
 local eventPage = tabPages[1]
 
 local eventScroll = Instance.new("ScrollingFrame")
-eventScroll.Size                = UDim2.new(1, 0, 1, 0)
+eventScroll.Size                   = UDim2.new(1, 0, 1, 0)
 eventScroll.BackgroundTransparency = 1
-eventScroll.BorderSizePixel     = 0
-eventScroll.ScrollBarThickness  = 3
-eventScroll.ScrollBarImageColor3 = C.PURPLE_DK
-eventScroll.CanvasSize          = UDim2.new(0, 0, 0, 0)
-eventScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-eventScroll.Parent              = eventPage
+eventScroll.BorderSizePixel        = 0
+eventScroll.ScrollBarThickness     = 3
+eventScroll.ScrollBarImageColor3   = C.PURPLE_DK
+eventScroll.CanvasSize             = UDim2.new(0, 0, 0, 0)
+eventScroll.AutomaticCanvasSize    = Enum.AutomaticSize.Y
+eventScroll.Parent                 = eventPage
 
 local eventLayout = Instance.new("UIListLayout")
-eventLayout.Padding = UDim.new(0, 6)
+eventLayout.Padding = UDim.new(0, 8)
 eventLayout.Parent  = eventScroll
 padding(eventScroll, 3)
 
@@ -401,58 +566,62 @@ local EVENT_LIST = {
 local eventBadgeLabels = {}  -- güncelleme için sakla
 
 for _, ev in ipairs(EVENT_LIST) do
+    local accent = ev.renk:Lerp(C.PURPLE, 0.55)
+
     local kart = Instance.new("TextButton")
     kart.Size             = UDim2.new(1, -6, 0, 68)
-    kart.BackgroundColor3 = C.BG2
+    kart.BackgroundColor3 = C.WHITE
     kart.BorderSizePixel  = 0
     kart.Text             = ""
     kart.AutoButtonColor  = false
     kart.Parent           = eventScroll
     corner(kart, 10)
-    stroke(kart, Color3.fromRGB(30, 25, 60))
+    local kartStroke = stroke(kart, Color3.fromRGB(34, 30, 70), 1)
+    gradient(kart, ev.renk:Lerp(C.BG2, 0.25), C.BG2, 0)
 
     -- Sol renkli şerit
     local serit = Instance.new("Frame")
-    serit.Size             = UDim2.new(0, 3, 1, 0)
-    serit.BackgroundColor3 = ev.renk
+    serit.Size             = UDim2.new(0, 4, 1, -20)
+    serit.Position         = UDim2.new(0, 8, 0, 10)
+    serit.BackgroundColor3 = accent
     serit.BorderSizePixel  = 0
     serit.Parent           = kart
-    corner(serit, 3)
+    corner(serit, 2)
 
     label(kart, {
         text  = ev.isim,
         font  = Enum.Font.GothamBold,
         size  = 13,
         color = C.TEXT,
-        sz    = UDim2.new(1, -110, 0, 20),
-        pos   = UDim2.new(0, 14, 0, 8),
+        sz    = UDim2.new(1, -120, 0, 20),
+        pos   = UDim2.new(0, 22, 0, 9),
     })
     label(kart, {
         text  = ev.aciklama,
         size  = 10,
-        color = C.MUTED,
-        sz    = UDim2.new(1, -110, 0, 14),
-        pos   = UDim2.new(0, 14, 0, 28),
+        color = C.PURPLE_LT,
+        sz    = UDim2.new(1, -120, 0, 14),
+        pos   = UDim2.new(0, 22, 0, 29),
     })
     label(kart, {
         text  = "Place ID: " .. ev.placeId,
         size  = 9,
-        color = Color3.fromRGB(70, 70, 100),
-        sz    = UDim2.new(1, -110, 0, 12),
-        pos   = UDim2.new(0, 14, 0, 44),
+        color = C.MUTED,
+        sz    = UDim2.new(1, -120, 0, 12),
+        pos   = UDim2.new(0, 22, 0, 46),
     })
 
-    -- Oyuncu sayısı badge
-    local _, badgeLbl = badge(kart, "👥 ...", Color3.fromRGB(15, 30, 15), C.GREEN, -84, 6)
+    -- Oyuncu sayısı badge (sağ üst)
+    local _, badgeLbl = badge(kart, "👥 ...", Color3.fromRGB(14, 34, 20), C.GREEN, -86, 10, 74)
     table.insert(eventBadgeLabels, { lbl = badgeLbl, placeId = ev.placeId })
 
     local gitBtn = button(kart, {
         text    = "→ Git",
-        bg      = ev.renk,
-        color   = C.PURPLE_LT,
+        bg      = accent:Lerp(C.BG, 0.45),
+        color   = C.WHITE,
         hoverBg = C.PURPLE_DK,
-        sz      = UDim2.new(0, 70, 0, 30),
-        pos     = UDim2.new(1, -78, 0.5, -15),
+        sz      = UDim2.new(0, 74, 0, 26),
+        pos     = UDim2.new(1, -86, 0, 34),
         size    = 11,
         radius  = 8,
     })
@@ -468,8 +637,8 @@ for _, ev in ipairs(EVENT_LIST) do
         if not ok then setStatus("❌ Teleport hatası: " .. tostring(err), true) end
     end)
 
-    kart.MouseEnter:Connect(function() kart.BackgroundColor3 = C.BG3 end)
-    kart.MouseLeave:Connect(function() kart.BackgroundColor3 = C.BG2 end)
+    kart.MouseEnter:Connect(function() tween(kartStroke, { Color = accent }, 0.15) end)
+    kart.MouseLeave:Connect(function() tween(kartStroke, { Color = Color3.fromRGB(34, 30, 70) }, 0.15) end)
 end
 
 -- Event oyuncu sayılarını arka planda güncelle
@@ -495,52 +664,63 @@ end)
 -- ════════════════════════════════════════════════════
 local farmPage = tabPages[2]
 
-local farmInfo = Instance.new("Frame")
-farmInfo.Size             = UDim2.new(1, -6, 0, 64)
-farmInfo.Position         = UDim2.new(0, 3, 0, 0)
-farmInfo.BackgroundColor3 = C.BG2
-farmInfo.BorderSizePixel  = 0
-farmInfo.Parent           = farmPage
-corner(farmInfo, 10)
-stroke(farmInfo, Color3.fromRGB(60, 50, 10))
+local _, SetFarmStatus = infoCard(farmPage, "🍬 Şeker Farmı", C.GOLD, "başlatılıyor...")
 
-label(farmInfo, {
-    text  = "🍬 Şeker Farmı",
-    font  = Enum.Font.GothamBold,
-    size  = 14,
-    color = C.GOLD,
-    sz    = UDim2.new(1, -20, 0, 20),
-    pos   = UDim2.new(0, 12, 0, 8),
-})
-
-local farmDurumLbl = label(farmInfo, {
-    text  = "Durum: başlatılıyor...",
-    size  = 11,
-    color = C.MUTED,
-    sz    = UDim2.new(1, -20, 0, 16),
-    pos   = UDim2.new(0, 12, 0, 36),
-})
-
-local function SetFarmStatus(Text)
-    farmDurumLbl.Text = "Durum: " .. Text
-end
-
+-- Anahtar (switch) görünümlü satır butonu
 local function toggleButton(parent, y)
     local b = Instance.new("TextButton")
     b.Size             = UDim2.new(1, -6, 0, 40)
     b.Position         = UDim2.new(0, 3, 0, y)
     b.BorderSizePixel  = 0
-    b.Font             = Enum.Font.GothamBold
-    b.TextSize         = 12
-    b.AutoButtonColor  = true
+    b.BackgroundColor3 = C.BG2
+    b.Text             = ""
+    b.AutoButtonColor  = false
     b.Parent           = parent
     corner(b, 10)
+    stroke(b, Color3.fromRGB(40, 36, 80), 1)
+
+    local lbl = label(b, {
+        text  = "",
+        font  = Enum.Font.GothamSemibold,
+        size  = 12,
+        color = C.TEXT,
+        sz    = UDim2.new(1, -74, 1, 0),
+        pos   = UDim2.new(0, 14, 0, 0),
+    })
+    lbl.Name = "Lbl"
+
+    local track = Instance.new("Frame")
+    track.Name             = "Track"
+    track.Size             = UDim2.new(0, 40, 0, 20)
+    track.Position         = UDim2.new(1, -54, 0.5, -10)
+    track.BackgroundColor3 = Color3.fromRGB(52, 52, 92)
+    track.BorderSizePixel  = 0
+    track.Parent           = b
+    corner(track, 10)
+
+    local knob = Instance.new("Frame")
+    knob.Name             = "Knob"
+    knob.Size             = UDim2.new(0, 14, 0, 14)
+    knob.Position         = UDim2.new(0, 3, 0.5, -7)
+    knob.BackgroundColor3 = C.WHITE
+    knob.BorderSizePixel  = 0
+    knob.Parent           = track
+    corner(knob, 7)
+
+    b.MouseEnter:Connect(function()
+        if not b:GetAttribute("On") then tween(b, { BackgroundColor3 = C.BG3 }, 0.12) end
+    end)
+    b.MouseLeave:Connect(function()
+        if not b:GetAttribute("On") then tween(b, { BackgroundColor3 = C.BG2 }, 0.12) end
+    end)
+
     return b
 end
 
 local FarmButton   = toggleButton(farmPage, 74)
 local StayButton   = toggleButton(farmPage, 120)
 local RenderButton = toggleButton(farmPage, 166)
+local RejoinButton = toggleButton(farmPage, 212)
 
 local function ApplyRender()
     pcall(function()
@@ -549,15 +729,34 @@ local function ApplyRender()
 end
 
 local function SetToggle(Button, Text, IsOn)
-    Button.Text             = Text .. ": " .. (IsOn and "AÇIK" or "KAPALI")
-    Button.BackgroundColor3 = IsOn and C.GREEN_DK or C.RED_DK
-    Button.TextColor3       = IsOn and C.GREEN or C.RED
+    Button:SetAttribute("On", IsOn)
+
+    local Lbl    = Button:FindFirstChild("Lbl")
+    local Track  = Button:FindFirstChild("Track")
+    local Border = Button:FindFirstChild("Stroke")
+
+    if Lbl then
+        Lbl.Text = Text
+        tween(Lbl, { TextColor3 = IsOn and C.WHITE or C.TEXT }, 0.18)
+    end
+    if Track then
+        tween(Track, { BackgroundColor3 = IsOn and C.GREEN or Color3.fromRGB(52, 52, 92) }, 0.18)
+        local Knob = Track:FindFirstChild("Knob")
+        if Knob then
+            tween(Knob, { Position = IsOn and UDim2.new(1, -17, 0.5, -7) or UDim2.new(0, 3, 0.5, -7) }, 0.18)
+        end
+    end
+    if Border then
+        tween(Border, { Color = IsOn and C.GREEN or Color3.fromRGB(40, 36, 80) }, 0.18)
+    end
+    tween(Button, { BackgroundColor3 = IsOn and C.GREEN_DK or C.BG2 }, 0.18)
 end
 
 local function Refresh()
     SetToggle(FarmButton,   "🍬 Farm", Config.Farm)
     SetToggle(StayButton,   "📌 Bu serverda kal", Config.Stay)
     SetToggle(RenderButton, "3D çizimi kapat", Config.NoRender)
+    SetToggle(RejoinButton, "🔁 Kick sonrası tekrar gir", Config.AutoRejoin)
 end
 
 FarmButton.MouseButton1Click:Connect(function()
@@ -590,12 +789,18 @@ RenderButton.MouseButton1Click:Connect(function()
     Refresh()
 end)
 
+RejoinButton.MouseButton1Click:Connect(function()
+    Config.AutoRejoin = not Config.AutoRejoin
+    SaveConfig()
+    Refresh()
+end)
+
 label(farmPage, {
-    text  = "Kal açıkken sunucu atlamaz, aynı yerde sürekli toplar. Farm kapatılınca karakter resetlenir. Paneli Sağ Shift ile gizleyebilirsin.",
+    text  = "Kal açıkken sunucu atlamaz, aynı yerde sürekli toplar. Farm kapatılınca karakter resetlenir.",
     size  = 10,
     color = C.MUTED,
-    sz    = UDim2.new(1, -6, 0, 56),
-    pos   = UDim2.new(0, 3, 0, 216),
+    sz    = UDim2.new(1, -6, 0, 44),
+    pos   = UDim2.new(0, 3, 0, 258),
     wrap  = true,
 })
 
@@ -620,36 +825,7 @@ local Goodl = {
     ChestClaimDelay = 1,
 }
 
-local goodlInfo = Instance.new("Frame")
-goodlInfo.Size             = UDim2.new(1, -6, 0, 64)
-goodlInfo.Position         = UDim2.new(0, 3, 0, 0)
-goodlInfo.BackgroundColor3 = C.BG2
-goodlInfo.BorderSizePixel  = 0
-goodlInfo.Parent           = goodlPage
-corner(goodlInfo, 10)
-stroke(goodlInfo, Color3.fromRGB(60, 50, 10))
-
-label(goodlInfo, {
-    text  = "💰 GOODL Autofarm",
-    font  = Enum.Font.GothamBold,
-    size  = 14,
-    color = C.GOLD,
-    sz    = UDim2.new(1, -20, 0, 20),
-    pos   = UDim2.new(0, 12, 0, 8),
-})
-
-local goodlDurumLbl = label(goodlInfo, {
-    text  = "Durum: kapalı",
-    size  = 11,
-    color = C.MUTED,
-    sz    = UDim2.new(1, -20, 0, 16),
-    pos   = UDim2.new(0, 12, 0, 36),
-})
-
-local function SetGoodlStatus(Text, IsError)
-    goodlDurumLbl.Text       = "Durum: " .. Text
-    goodlDurumLbl.TextColor3 = IsError and C.RED or C.MUTED
-end
+local _, SetGoodlStatus = infoCard(goodlPage, "💰 GOODL Autofarm", C.GOLD, "kapalı")
 
 local GoldOnlyButton  = toggleButton(goodlPage, 74)
 local GoldBlockButton = toggleButton(goodlPage, 120)
@@ -936,6 +1112,86 @@ local function CollectHouses()
     print(("[House Collector] Tur bitti: %d ev tetiklendi, %d ev atlandi (TouchInterest yok)"):format(Fired, Skipped))
 end
 
+-- ════════════════════════════════════════════════════
+-- HOP HATA SAYACI (üst üste başarısız ışınlanmada bekleme artar)
+-- Başarılı ışınlanmada script yeni sunucuda baştan başladığı için sayaç otomatik sıfırlanır.
+-- ════════════════════════════════════════════════════
+local HopFails = 0
+
+local function HopBackoff()
+    -- her hata +2 sn ekstra bekleme, en fazla 30 sn
+    return math.min(HopFails * 2, 30)
+end
+
+TeleportService.TeleportInitFailed:Connect(function(_, Result)
+    -- "zaten ışınlanıyor" hatası gerçek bir hata sayılmaz
+    if Result and Result.Name == "IsTeleporting" then
+        return
+    end
+
+    HopFails += 1
+    warn(("[Server Hop] Işınlanma hatası #%d (%s) - ekstra bekleme: %d sn"):format(
+        HopFails, tostring(Result), HopBackoff()))
+    SetFarmStatus(("ışınlanma hatası x%d, +%d sn bekleniyor"):format(HopFails, HopBackoff()))
+end)
+
+-- ════════════════════════════════════════════════════
+-- KICK / BAĞLANTI KOPMASI SONRASI OTOMATİK TEKRAR GİRİŞ
+-- (Işınlanma hataları hop sistemine aittir, burada işlenmez)
+-- ════════════════════════════════════════════════════
+do
+    local GuiService = game:GetService("GuiService")
+    local Rejoining = false
+
+    local function TryRejoin()
+        if Rejoining or not Config.AutoRejoin then
+            return
+        end
+        Rejoining = true
+
+        task.spawn(function()
+            task.wait(2)
+
+            for Attempt = 1, 15 do
+                if not Config.AutoRejoin then
+                    break
+                end
+
+                SetFarmStatus(("bağlantı koptu, tekrar giriliyor (%d)..."):format(Attempt))
+                QueueSelf()
+
+                pcall(function()
+                    TeleportService:Teleport(game.PlaceId, LocalPlayer)
+                end)
+
+                -- Hâlâ buradaysak ışınlanma olmadı, biraz bekleyip tekrar dene
+                task.wait(5 + math.min(Attempt * 2, 20))
+            end
+
+            Rejoining = false
+        end)
+    end
+
+    GuiService.ErrorMessageChanged:Connect(function()
+        local Message = GuiService:GetErrorMessage()
+        if not Message or Message == "" then
+            return
+        end
+
+        local Ok, Code = pcall(function()
+            return GuiService:GetErrorCode()
+        end)
+
+        -- Teleport hata kodları (768+) hop sistemine ait, onları atla
+        if Ok and Code and Code.Value >= Enum.ConnectionError.TeleportErrors.Value then
+            return
+        end
+
+        warn("[Auto Rejoin] Bağlantı hatası: " .. tostring(Message))
+        TryRejoin()
+    end)
+end
+
 -- Sunucu atlama kodu (orijinal) bir fonksiyonun icinde.
 -- Tek fark: hata pencereleri sadece ilk calismada siliniyor (ikinci calismada WaitForChild sonsuza kadar bekliyordu).
 local PromptsRemoved = false
@@ -995,7 +1251,7 @@ local function StartTeleport()
                 appendfile("Attempts.txt", JobId .. "\n")
             end
             TeleportService:TeleportToPlaceInstance(game.PlaceId, JobId, game.Players.LocalPlayer)
-            task.wait(IterationSpeed)
+            task.wait(IterationSpeed + HopBackoff())
         end
     end
 end
@@ -1084,7 +1340,7 @@ task.spawn(function()
             if not Ok then
                 warn("[Server Hop] Hata: " .. tostring(HopError))
             end
-            task.wait(10)
+            task.wait(3 + HopBackoff())
         end
     end
 end)
@@ -1094,7 +1350,7 @@ if Config.Goodl == "gold" or Config.Goodl == "block" then
     task.spawn(StartGoodl, Config.Goodl, true)
 end
 
-print("🌙 Luna Bot v4.1 + 🍬 Şeker Farmı + 💰 GOODL yüklendi!")
+print("🌙x🍬x💰 yüklendi!")
 ]==]
 
 local Run, CompileError = loadstring(
