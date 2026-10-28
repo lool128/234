@@ -30,7 +30,7 @@ local Player      = LocalPlayer
 -- AYARLAR (sunucu değişince de korunur)
 -- ════════════════════════════════════════════════════
 local ConfigFile = "HouseFarmConfig.json"
-local Config = { Farm = true, Stay = false, NoRender = false, Goodl = "off", AutoRejoin = true, OpenedHouses = 0, MoneyGain = 0, AutoFpsHop = true }
+local Config = { Farm = true, Stay = false, NoRender = false, Goodl = "off", AutoRejoin = true, OpenedHouses = 0, MoneyGain = 0, AutoFpsHop = true, FastHop = false }
 
 pcall(function()
     if isfile and isfile(ConfigFile) then
@@ -44,6 +44,7 @@ pcall(function()
             if type(Data.OpenedHouses) == "number" then Config.OpenedHouses = Data.OpenedHouses end
             if type(Data.MoneyGain) == "number" then Config.MoneyGain = Data.MoneyGain end
             if type(Data.AutoFpsHop) == "boolean" then Config.AutoFpsHop = Data.AutoFpsHop end
+            if type(Data.FastHop) == "boolean" then Config.FastHop = Data.FastHop end
         end
     end
 end)
@@ -283,7 +284,7 @@ end
 -- ════════════════════════════════════════════════════
 -- ANA GUI
 -- ════════════════════════════════════════════════════
-local PANEL_W, PANEL_H = 340, 490
+local PANEL_W, PANEL_H = 340, 534
 
 local sg = Instance.new("ScreenGui")
 sg.Name           = "LunaBotV41"
@@ -508,7 +509,7 @@ tabLayout.Parent              = tabBar
 padding(tabBar, 4)
 
 local TAB_NAMES = { "Eventler", "Şeker", "GOODL" }
-local TAB_ICONS = { "🎯", "🍬", "💰" }
+local TAB_ICONS = { "🌙", "🍬", "💰" }
 local tabBtns   = {}
 local tabPages  = {}
 local ActiveTab = 0
@@ -668,22 +669,22 @@ padding(eventScroll, 3)
 
 local EVENT_LIST = {
     {
-        isim    = "🔐 The Secret Place",
+        isim    = "test serevr",
         placeId = 1930665568,
         renk    = Color3.fromRGB(40, 20, 70),
-        aciklama = "Gizli etkinlik alanı",
+        aciklama = "hızlı yüklemyi açın +bilok almyın ",
     },
     {
         isim    = "🥚 Paskalya Event",
         placeId = 1930863474,
         renk    = Color3.fromRGB(60, 45, 10),
-        aciklama = "Paskalya yumurtası avı",
+        aciklama = "",
     },
     {
         isim    = "❄ Winter Place",
         placeId = 1930866268,
         renk    = Color3.fromRGB(10, 40, 70),
-        aciklama = "Kış temalı özel alan",
+        aciklama = "",
     },
 }
 
@@ -837,6 +838,7 @@ local StayButton   = toggleButton(farmPage, 116)
 local RenderButton = toggleButton(farmPage, 160)
 local RejoinButton = toggleButton(farmPage, 204)
 local FpsButton    = toggleButton(farmPage, 248)
+local FastButton   = toggleButton(farmPage, 292)
 
 local function ApplyRender()
     pcall(function()
@@ -879,6 +881,7 @@ local function Refresh()
     SetToggle(RenderButton, "3D çizimi kapat", Config.NoRender)
     SetToggle(RejoinButton, "🔁 Kick sonrası tekrar gir", Config.AutoRejoin)
     SetToggle(FpsButton,    "📉 FPS düşünce atla", Config.AutoFpsHop)
+    SetToggle(FastButton,   "⚡ Hızlı mod (0.5 sn)", Config.FastHop)
 end
 
 FarmButton.MouseButton1Click:Connect(function()
@@ -919,6 +922,12 @@ end)
 
 FpsButton.MouseButton1Click:Connect(function()
     Config.AutoFpsHop = not Config.AutoFpsHop
+    SaveConfig()
+    Refresh()
+end)
+
+FastButton.MouseButton1Click:Connect(function()
+    Config.FastHop = not Config.FastHop
     SaveConfig()
     Refresh()
 end)
@@ -970,7 +979,7 @@ local function statCard(parent, pos, size, title, accent)
     return t, v
 end
 
-local _, HouseValue = statCard(farmPage, UDim2.new(0, 3, 0, 292), UDim2.new(1, -6, 0, 38), "🏠 AÇILAN EV", C.PURPLE_LT)
+local _, HouseValue = statCard(farmPage, UDim2.new(0, 3, 0, 336), UDim2.new(1, -6, 0, 38), "🏠 AÇILAN EV", C.PURPLE_LT)
 
 local StatsDirty = false
 
@@ -1041,7 +1050,7 @@ label(farmPage, {
     color = C.MUTED,
     align = CENTER,
     sz    = UDim2.new(1, -6, 0, 26),
-    pos   = UDim2.new(0, 3, 0, 334),
+    pos   = UDim2.new(0, 3, 0, 378),
     wrap  = true,
 })
 
@@ -1726,7 +1735,9 @@ task.spawn(function()
         end
 
         SetFarmStatus("bekliyor...")
-        local Finished = WaitSeconds(1.5 + HouseCount)
+        -- Hızlı mod kapalı: 1.0 + ev * 0.2 | Hızlı mod açık: 0.5 + ev * 0.2
+        local BaseWait = Config.FastHop and 0.5 or 1.0
+        local Finished = WaitSeconds(BaseWait + HouseCount * 0.2)
 
         if Finished and Config.Farm and not Config.Stay then
             SetFarmStatus("sunucu aranıyor...")
