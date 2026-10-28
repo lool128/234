@@ -1535,8 +1535,10 @@ do
     end)
 end
 
--- Sunucu atlama sistemi: ziyaret geçmişi, sayfalama ve HTTP yedek yöntemi.
+-- ════════════════════════════════════════════════════
+-- SUNUCU ATLAMA (Servers.JSON önbellekli sistem)
 -- Config.Farm kapalıysa veya Config.Stay açıksa sunucu değiştirmez.
+-- ════════════════════════════════════════════════════
 local PromptsRemoved = false
 local function ServerHopRun()
     if not Config.Farm or Config.Stay then
@@ -1544,193 +1546,167 @@ local function ServerHopRun()
     end
 
     local HttpService = game:GetService("HttpService")
-    local TeleportService = game:GetService("TeleportService")
+    local CoreGui = game:GetService("CoreGui")
     local LocalPlayer = Players.LocalPlayer
 
-    local IterationSpeed = 0.5
-    local ExcludeFullServers = true
+    local RemoveErrorPrompts = true  -- hata pencerelerinin çıkmasını engeller
+    local IterationSpeed = 0.25      -- sıradaki sunucuya geçme hızı
+    local ExcludefullServers = true
     local SaveTeleportAttempts = false
-    local VisitedFile = "VisitedServers.json"
-    local VisitedMax = 15
-    local ServersFile = "Servers.JSON"
-    local Api = "https://games.roblox.com/v1/games/" .. game.PlaceId
-        .. "/servers/Public?limit=100&sortOrder=Asc&excludeFullGames="
-        .. tostring(ExcludeFullServers)
+    local API = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?limit=100"
 
-    local VisitedArray, VisitedSet = {}, {}
-
-    pcall(function()
-        if isfile and isfile(VisitedFile) then
-            local saved = HttpService:JSONDecode(readfile(VisitedFile))
-            if type(saved) == "table" then
-                for _, id in ipairs(saved) do
-                    if type(id) == "string" and id ~= "" and not VisitedSet[id] then
-                        VisitedSet[id] = true
-                        table.insert(VisitedArray, id)
-                    end
-                end
-            end
-        end
-    end)
-
-    local function SaveVisited()
+    if RemoveErrorPrompts and not PromptsRemoved then
+        PromptsRemoved = true
         pcall(function()
-            writefile(VisitedFile, HttpService:JSONEncode(VisitedArray))
+            local Gui = CoreGui:WaitForChild("RobloxGui", 5)
+            local Modules = Gui and Gui:WaitForChild("Modules", 5)
+            local Prompt = Modules and Modules:WaitForChild("ErrorPrompt", 5)
+            if Prompt then Prompt:Destroy() end
         end)
-    end
-
-    local function MarkVisited(jobId)
-        if type(jobId) ~= "string" or jobId == "" or VisitedSet[jobId] then
-            return
-        end
-        VisitedSet[jobId] = true
-        table.insert(VisitedArray, jobId)
-        while #VisitedArray > VisitedMax do
-            local oldId = table.remove(VisitedArray, 1)
-            VisitedSet[oldId] = nil
-        end
-        SaveVisited()
-    end
-
-    MarkVisited(game.JobId)
-
-    local function Get(url)
-        local ok, result = pcall(function()
-            return game:HttpGet(url)
-        end)
-        if ok and type(result) == "string" and result ~= "" then
-            return result
-        end
-
-        local requestFn = (syn and syn.request) or request or http_request
-            or (http and http.request)
-        if requestFn then
-            local reqOk, response = pcall(requestFn, {
-                Url = url,
-                Method = "GET",
-            })
-            if reqOk and response and type(response.Body) == "string"
-                and response.Body ~= "" then
-                return response.Body
-            end
-        end
-
-        warn("[Server Hop] Sunucu listesi alınamadı: " .. tostring(result))
-        return nil
-    end
-
-    local function DecodePage(raw)
-        if type(raw) ~= "string" or raw == "" then
-            return nil
-        end
-        local ok, data = pcall(function()
-            return HttpService:JSONDecode(raw)
-        end)
-        if not ok or type(data) ~= "table" or type(data.data) ~= "table" then
-            return nil
-        end
-        data.gameId = game.PlaceId
         pcall(function()
-            writefile(ServersFile, HttpService:JSONEncode(data))
+            local PromptGui = CoreGui:FindFirstChild("RobloxPromptGui")
+            if PromptGui then PromptGui:Destroy() end
         end)
-        return data
-    end
-
-    local function GetPage(cursor)
-        local url = Api
-        if cursor and cursor ~= "" then
-            url ..= "&cursor=" .. HttpService:UrlEncode(cursor)
-        end
-        return DecodePage(Get(url))
     end
 
     local function ShouldStop()
         return not Config.Farm or Config.Stay
     end
 
-    -- Önce önbelleği kullan; bozuk veya başka oyuna aitse ilk sayfayı yeniden al.
-    local page
-    pcall(function()
-        if isfile and isfile(ServersFile) then
-            local cached = HttpService:JSONDecode(readfile(ServersFile))
-            if type(cached) == "table" and cached.gameId == game.PlaceId
-                and type(cached.data) == "table" then
-                page = cached
-            end
+    local function EncodeToFile(JSONString)
+        if type(JSONString) ~= "string" or JSONString == "" then
+            return nil
         end
-    end)
-    if not page then
-        page = GetPage(nil)
+        local ok, Data = pcall(function()
+            return HttpService:JSONDecode(JSONString)
+        end)
+        if not ok or type(Data) ~= "table" or type(Data.data) ~= "table" then
+            warn("[Server Hop] JSON çözülemedi.")
+            return nil
+        end
+        Data.gameId = game.PlaceId
+        pcall(function()
+            writefile("Servers.JSON", HttpService:JSONEncode(Data))
+        end)
+        return Data
     end
-    if not page then
+
+    local function Fetch(Cursor)
+        local Url = API .. "&excludeFullGames=" .. tostring(ExcludefullServers)
+        if Cursor and Cursor ~= "" then
+            Url ..= "&cursor=" .. Cursor
+        end
+        local ok, Result = pcall(function()
+            return game:HttpGet(Url)
+        end)
+        if ok and type(Result) == "string" and Result ~= "" then
+            return Result
+        end
+        warn("[Server Hop] Sunucu listesi alınamadı: " .. tostring(Result))
+        return nil
+    end
+
+    local function NextCursor(Cursor)
+        return EncodeToFile(Fetch(Cursor))
+    end
+
+    local function SetMainPage()
+        return EncodeToFile(Fetch(nil))
+    end
+
+    local function LoadCache()
+        local ok, Data = pcall(function()
+            if isfile and isfile("Servers.JSON") then
+                return HttpService:JSONDecode(readfile("Servers.JSON"))
+            end
+        end)
+        if ok and type(Data) == "table" and type(Data.data) == "table" then
+            return Data
+        end
+        return nil
+    end
+
+    -- Önbelleği yükle, başka oyuna aitse veya bozuksa baştan al
+    local Data = LoadCache()
+    if not Data or Data.gameId ~= game.PlaceId then
+        if Data then
+            warn("[Server Hop] Önbellek başka oyuna ait, yenileniyor -> " .. game.PlaceId)
+        end
+        Data = SetMainPage()
+    end
+
+    if Data and #Data.data < 1 then
+        if Data.nextPageCursor and Data.nextPageCursor ~= "" then
+            Data = NextCursor(Data.nextPageCursor)
+        else
+            Data = SetMainPage() -- sayfa kalmadı, baştan başla
+        end
+    end
+
+    if not Data then
         task.wait(3)
         return
     end
 
-    local pagesVisited = 0
-    while page and not ShouldStop() and pagesVisited < 20 do
-        pagesVisited += 1
+    local PagesFetched = 0
 
-        for _, server in ipairs(page.data) do
-            if ShouldStop() then
+    while Data and not ShouldStop() do
+        local Entry = table.remove(Data.data, 1)
+
+        if not Entry then
+            -- Bu sayfa bitti, sıradaki sayfaya geç
+            PagesFetched += 1
+            if PagesFetched >= 20 then
+                break
+            end
+            if Data.nextPageCursor and Data.nextPageCursor ~= "" then
+                Data = NextCursor(Data.nextPageCursor)
+            else
+                Data = SetMainPage()
+            end
+            if not Data then
+                task.wait(2)
+                break
+            end
+            continue
+        end
+
+        local JobId = Entry.id
+        local Playing = tonumber(Entry.playing) or 0
+        local MaxPlayers = tonumber(Entry.maxPlayers) or math.huge
+
+        -- Kullanılan sunucu listeden silinmiş halde dosyaya yazılır
+        pcall(function()
+            writefile("Servers.JSON", HttpService:JSONEncode(Data))
+        end)
+
+        if type(JobId) == "string" and JobId ~= "" and JobId ~= game.JobId
+            and Playing < MaxPlayers then
+
+            if SaveTeleportAttempts then
+                pcall(function()
+                    appendfile("Attempts.txt", JobId .. "\n")
+                end)
+            end
+
+            SetFarmStatus("yeni sunucuya geçiliyor...")
+            local BeforeJobId = game.JobId
+            local TeleportOk, TeleportError = pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, JobId, LocalPlayer)
+            end)
+
+            if not TeleportOk then
+                warn("[Server Hop] Teleport çağrısı başarısız: " .. tostring(TeleportError))
+            end
+
+            task.wait(IterationSpeed + HopBackoff())
+            if game.JobId ~= BeforeJobId then
                 return
             end
-
-            local jobId = server and server.id
-            local playing = tonumber(server and server.playing) or 0
-            local maxPlayers = tonumber(server and server.maxPlayers) or math.huge
-
-            if type(jobId) == "string" and jobId ~= "" and jobId ~= game.JobId
-                and not VisitedSet[jobId] and playing < maxPlayers then
-
-                MarkVisited(jobId)
-                if SaveTeleportAttempts then
-                    pcall(function()
-                        appendfile("Attempts.txt", jobId .. "\n")
-                    end)
-                end
-
-                SetFarmStatus("yeni sunucuya geçiliyor...")
-                local beforeJobId = game.JobId
-                local teleportOk, teleportError = pcall(function()
-                    -- Parametre sırası: placeId, instanceId (JobId), player.
-                    TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LocalPlayer)
-                end)
-
-                if not teleportOk then
-                    warn("[Server Hop] Teleport çağrısı başarısız: " .. tostring(teleportError))
-                end
-
-                task.wait(IterationSpeed + HopBackoff())
-                if game.JobId ~= beforeJobId then
-                    return
-                end
-                -- Başarısız denemeden sonra sıradaki sunucuyu dene.
-            end
-        end
-
-        if ShouldStop() then
-            return
-        end
-        if not page.nextPageCursor or page.nextPageCursor == "" then
-            break
-        end
-
-        page = GetPage(page.nextPageCursor)
-        if not page then
-            task.wait(2)
-            break
         end
     end
 
-    -- Liste tarandıysa sonraki çalıştırmada en baştan yeni bir liste al.
     if not ShouldStop() then
-        local freshPage = GetPage(nil)
-        if freshPage then
-            pcall(function()
-                writefile(ServersFile, HttpService:JSONEncode(freshPage))
-            end)
-        end
         task.wait(2)
     end
 end
